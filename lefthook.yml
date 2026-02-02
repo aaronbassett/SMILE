@@ -37,7 +37,7 @@ pre-commit:
     python-ruff:
       root: "python/"
       glob: "*.py"
-      run: cd python && ruff check {staged_files}
+      run: .venv/bin/ruff check python/{staged_files}
       skip:
         - merge
         - rebase
@@ -45,7 +45,7 @@ pre-commit:
     python-ruff-format:
       root: "python/"
       glob: "*.py"
-      run: cd python && ruff format --check {staged_files}
+      run: .venv/bin/ruff format --check python/{staged_files}
       skip:
         - merge
         - rebase
@@ -65,17 +65,9 @@ pre-push:
     python-test:
       root: "python/"
       glob: "*.py"
-      run: |
-        if [ -f .venv/bin/activate ]; then
-          . .venv/bin/activate
-        fi
-        cd python && pytest
+      run: .venv/bin/pytest python/tests
 
     python-mypy:
       root: "python/"
       glob: "*.py"
-      run: |
-        if [ -f .venv/bin/activate ]; then
-          . .venv/bin/activate
-        fi
-        cd python && mypy smile_wrappers
+      run: .venv/bin/mypy python/smile_wrappers
