@@ -1,0 +1,59 @@
+# SMILE Base Image
+# Base image for Student and Mentor agent execution
+#
+# This image provides:
+# - Python 3.11+ with smile_wrappers package
+# - LLM CLI tools (claude, codex, gemini) - placeholders for now
+# - Network access for orchestrator callbacks
+
+FROM ubuntu:24.04
+
+# Avoid prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    python3.12 \
+    python3.12-venv \
+    python3-pip \
+    curl \
+    git \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user for agent execution
+RUN useradd -m -s /bin/bash smile
+
+# Set up Python virtual environment
+ENV VIRTUAL_ENV=/opt/venv
+RUN python3.12 -m venv $VIRTUAL_ENV
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
+# Install Python dependencies
+# Will be updated when smile_wrappers is published or built
+COPY python/pyproject.toml /tmp/python/pyproject.toml
+COPY python/smile_wrappers /tmp/python/smile_wrappers
+COPY python/README.md /tmp/python/README.md
+RUN pip install --no-cache-dir /tmp/python && rm -rf /tmp/python
+
+# Placeholder for LLM CLI installations
+# These will be configured at runtime via environment variables
+# and volume mounts for credentials
+
+# Claude CLI (placeholder)
+# RUN npm install -g @anthropic-ai/claude-cli
+
+# Codex CLI (placeholder)
+# RUN pip install openai
+
+# Gemini CLI (placeholder)
+# RUN pip install google-generativeai
+
+# Working directory for tutorial execution
+WORKDIR /workspace
+
+# Switch to non-root user
+USER smile
+
+# Default command - will be overridden by orchestrator
+CMD ["python", "-c", "print('SMILE base image ready')"]
