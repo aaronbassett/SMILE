@@ -56,16 +56,19 @@ unsafe_code = "forbid"
 missing_docs = "warn"
 
 [workspace.lints.clippy]
-all = "warn"
-pedantic = "warn"
-nursery = "warn"
-cargo = "warn"
+# Lint groups with lower priority so individual lints can override
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
 
 # Allow certain patterns
 module_name_repetitions = "allow"
 must_use_candidate = "allow"
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
+cargo_common_metadata = "allow"
+multiple_crate_versions = "allow"
 
 # Deny certain patterns
 unwrap_used = "deny"

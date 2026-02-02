@@ -2,7 +2,4 @@
 //!
 //! Docker container lifecycle management via bollard.
 
-/// Placeholder module
-pub fn placeholder() {
-    // TODO: Implement container management
-}
+// Module will be populated in Phase 5 (US4: Isolated Execution Environment)

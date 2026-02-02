@@ -2,7 +2,4 @@
 //!
 //! Manages the Student-Mentor loop, HTTP API, and WebSocket events.
 
-/// Placeholder module
-pub fn placeholder() {
-    // TODO: Implement orchestrator
-}
+// Module will be populated in Phase 2 (Foundational) and subsequent phases

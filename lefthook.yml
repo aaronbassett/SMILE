@@ -65,9 +65,17 @@ pre-push:
     python-test:
       root: "python/"
       glob: "*.py"
-      run: cd python && pytest
+      run: |
+        if [ -f .venv/bin/activate ]; then
+          . .venv/bin/activate
+        fi
+        cd python && pytest
 
     python-mypy:
       root: "python/"
       glob: "*.py"
-      run: cd python && mypy smile_wrappers
+      run: |
+        if [ -f .venv/bin/activate ]; then
+          . .venv/bin/activate
+        fi
+        cd python && mypy smile_wrappers
