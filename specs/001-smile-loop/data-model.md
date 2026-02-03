@@ -413,6 +413,21 @@ pub enum GapSeverity {
     Major,     // Significant confusion or delay
     Minor,     // Minor clarification needed
 }
+```
+
+**Gap Severity Mapping**:
+
+When generating reports, the `ReportGenerator` maps `StudentStatus` values to `GapSeverity` as follows:
+
+| StudentStatus | GapSeverity | Rationale |
+|---------------|-------------|-----------|
+| `AskMentor` | `Major` | Student struggled but could continue with mentor guidance |
+| `CannotComplete` | `Critical` | Student was completely blocked, tutorial has a fundamental issue |
+| `Completed` | N/A | No gap generated - iteration was successful |
+
+This mapping is implemented in `crates/smile-report/src/lib.rs` in the `ReportGenerator::extract_gaps()` method.
+
+```rust
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TimelineEntry {
