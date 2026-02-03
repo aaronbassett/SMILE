@@ -355,23 +355,23 @@ Shared infrastructure required by all user stories.
 **Independent Test**: Run against sample tutorial with intentional gaps, verify report identifies gaps
 
 ### Phase Start
-- [ ] T188 [GIT] Verify working tree is clean before starting Phase 10
-- [ ] T189 [GIT] Pull and rebase on origin/main if needed
-- [ ] T190 [US1] Create retro/P10.md for this phase
-- [ ] T191 [GIT] Commit: initialize phase 10 retro
+- [x] T188 [GIT] Verify working tree is clean before starting Phase 10
+- [x] T189 [GIT] Pull and rebase on origin/main if needed
+- [x] T190 [US1] Create retro/P10.md for this phase
+- [x] T191 [GIT] Commit: initialize phase 10 retro
 
 ### Implementation
-- [ ] T192 [US1] Create tests/integration/fixtures/sample-tutorial/ with intentional gaps
-- [ ] T193 [GIT] Commit: add sample tutorial fixture
-- [ ] T194 [US1] Finalize Dockerfile.base with LLM CLI installation in docker/Dockerfile.base
-- [ ] T195 [GIT] Commit: finalize base Dockerfile
-- [ ] T196 [US1] Implement end-to-end integration test in tests/integration/test_loop.rs (use devs:rust-dev agent)
-- [ ] T197 [GIT] Commit: add end-to-end integration test
+- [x] T192 [US1] Create tests/integration/fixtures/sample-tutorial/ with intentional gaps
+- [x] T193 [GIT] Commit: add sample tutorial fixture
+- [x] T194 [US1] Finalize Dockerfile.base with LLM CLI installation in docker/Dockerfile.base
+- [x] T195 [GIT] Commit: finalize base Dockerfile
+- [x] T196 [US1] Implement end-to-end integration test in tests/integration/test_loop.rs (use devs:rust-dev agent)
+- [x] T197 [GIT] Commit: add end-to-end integration test
 
 ### Phase Completion
-- [ ] T198 [US1] Run /sdd:map incremental for Phase 10 changes
-- [ ] T199 [GIT] Commit: update codebase documents for phase 10
-- [ ] T200 [US1] Review retro/P10.md and extract critical learnings to CLAUDE.md (conservative)
+- [x] T198 [US1] Run /sdd:map incremental for Phase 10 changes (skipped - not configured)
+- [x] T199 [GIT] Commit: update codebase documents for phase 10 (skipped - not configured)
+- [x] T200 [US1] Review retro/P10.md and extract critical learnings to CLAUDE.md (no critical learnings - patterns are phase-specific)
 - [ ] T201 [GIT] Commit: finalize phase 10 retro
 - [ ] T202 [GIT] Push branch to origin (ensure pre-push hooks pass)
 - [ ] T203 [GIT] Create/update PR to main with phase summary
