@@ -332,8 +332,8 @@ Shared infrastructure required by all user stories.
 - [x] T173 [P] [US10] Implement Markdown report generation in crates/smile-report/src/markdown.rs (use devs:rust-dev agent)
 - [x] T174 [P] [US10] Implement JSON report generation in crates/smile-report/src/json.rs (use devs:rust-dev agent)
 - [x] T175 [GIT] Commit: add report generation
-- [ ] T176 [US10] Implement gap extraction from loop history in crates/smile-report/src/lib.rs (use devs:rust-dev agent)
-- [ ] T177 [GIT] Commit: add gap extraction
+- [x] T176 [US10] Implement gap extraction from loop history in crates/smile-report/src/lib.rs (use devs:rust-dev agent)
+- [x] T177 [GIT] Commit: add gap extraction
 - [ ] T178 [US10] Integrate report generation into CLI on loop completion in crates/smile-cli/src/main.rs (use devs:rust-dev agent)
 - [ ] T179 [GIT] Commit: integrate report generation
 

@@ -919,6 +919,527 @@ impl Recommendation {
 }
 
 // ============================================================================
+// Input Types (mirrors orchestrator types to avoid circular deps)
+// ============================================================================
+
+/// Input data for report generation.
+///
+/// This mirrors `LoopState` from the orchestrator crate but is owned by
+/// `smile-report` to avoid circular dependencies. When generating a report,
+/// the orchestrator converts its `LoopState` into this structure.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReportInput {
+    /// Name of the tutorial being validated.
+    pub tutorial_name: String,
+    /// Path to the tutorial file.
+    pub tutorial_path: String,
+    /// Final status of the loop.
+    pub status: ReportStatus,
+    /// Total number of iterations completed.
+    pub iterations: u32,
+    /// When the loop started.
+    pub started_at: DateTime<Utc>,
+    /// When the loop ended.
+    pub ended_at: DateTime<Utc>,
+    /// History of all iterations.
+    pub history: Vec<IterationInput>,
+    /// Notes from mentor consultations.
+    pub mentor_notes: Vec<MentorNoteInput>,
+}
+
+/// Input data for a single iteration.
+///
+/// This mirrors `IterationRecord` from the orchestrator crate.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IterationInput {
+    /// Iteration number (1-indexed).
+    pub iteration: u32,
+    /// Final status of the student agent for this iteration.
+    pub student_status: StudentStatusInput,
+    /// The step being worked on.
+    pub current_step: String,
+    /// Problem description if stuck.
+    pub problem: Option<String>,
+    /// Question for the mentor if status is `AskMentor`.
+    pub question_for_mentor: Option<String>,
+    /// Reason if status is `CannotComplete`.
+    pub reason: Option<String>,
+    /// Summary of work done in this iteration.
+    pub summary: String,
+    /// Files created during this iteration.
+    pub files_created: Vec<String>,
+    /// Commands executed during this iteration.
+    pub commands_run: Vec<String>,
+    /// When the iteration started.
+    pub started_at: DateTime<Utc>,
+    /// When the iteration ended.
+    pub ended_at: DateTime<Utc>,
+}
+
+/// Student status from a single iteration.
+///
+/// This mirrors `StudentStatus` from the orchestrator crate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StudentStatusInput {
+    /// Student completed successfully.
+    Completed,
+    /// Student needs to ask the mentor.
+    AskMentor,
+    /// Student cannot complete the task.
+    CannotComplete,
+}
+
+/// Input data for a mentor note.
+///
+/// This mirrors `MentorNote` from the orchestrator crate.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MentorNoteInput {
+    /// Iteration when the question was asked.
+    pub iteration: u32,
+    /// The question asked by the student.
+    pub question: String,
+    /// The mentor's answer.
+    pub answer: String,
+    /// When the mentor responded.
+    pub timestamp: DateTime<Utc>,
+}
+
+// ============================================================================
+// ReportGenerator
+// ============================================================================
+
+/// Generates reports from loop state history.
+///
+/// The `ReportGenerator` transforms raw loop execution data into structured
+/// reports with gaps, timelines, audit trails, and recommendations.
+///
+/// # Example
+///
+/// ```rust
+/// use smile_report::{ReportGenerator, ReportInput, ReportStatus};
+/// use chrono::Utc;
+///
+/// let input = ReportInput {
+///     tutorial_name: "getting-started.md".to_string(),
+///     tutorial_path: "/tutorials/getting-started.md".to_string(),
+///     status: ReportStatus::Completed,
+///     iterations: 3,
+///     started_at: Utc::now(),
+///     ended_at: Utc::now(),
+///     history: vec![],
+///     mentor_notes: vec![],
+/// };
+///
+/// let generator = ReportGenerator::new(input);
+/// let report = generator.generate();
+/// ```
+pub struct ReportGenerator {
+    input: ReportInput,
+}
+
+impl ReportGenerator {
+    /// Creates a new report generator from input data.
+    #[must_use]
+    pub const fn new(input: ReportInput) -> Self {
+        Self { input }
+    }
+
+    /// Generates a complete report from the input data.
+    ///
+    /// This method extracts gaps from the iteration history, builds a timeline
+    /// of events, creates an audit trail, and generates recommendations.
+    #[must_use]
+    pub fn generate(&self) -> Report {
+        let duration_seconds = u64::try_from(
+            self.input
+                .ended_at
+                .signed_duration_since(self.input.started_at)
+                .num_seconds()
+                .max(0),
+        )
+        .unwrap_or(0);
+
+        let summary = ReportSummary {
+            status: self.input.status,
+            iterations: self.input.iterations,
+            duration_seconds,
+            tutorial_path: self.input.tutorial_path.clone(),
+        };
+
+        Report {
+            tutorial_name: self.input.tutorial_name.clone(),
+            summary,
+            gaps: self.extract_gaps(),
+            timeline: self.build_timeline(),
+            audit_trail: self.build_audit_trail(),
+            recommendations: self.generate_recommendations(),
+        }
+    }
+
+    /// Extracts documentation gaps from the iteration history.
+    ///
+    /// Gaps are identified from:
+    /// - `AskMentor` events (severity: Major) - student needed help
+    /// - `CannotComplete` events (severity: Critical) - student was blocked
+    fn extract_gaps(&self) -> Vec<Gap> {
+        let mut gaps = Vec::new();
+        let mut gap_id = 1u32;
+
+        for iteration in &self.input.history {
+            match iteration.student_status {
+                StudentStatusInput::AskMentor => {
+                    let mentor_note = self.find_mentor_note(iteration.iteration);
+                    let suggested_fix = mentor_note.map_or_else(
+                        || "Review and clarify this step".to_string(),
+                        |n| n.answer.clone(),
+                    );
+
+                    let title = iteration.problem.as_ref().map_or_else(
+                        || "Needed mentor guidance".to_string(),
+                        |p| truncate_string(p, 50),
+                    );
+
+                    let problem = iteration
+                        .question_for_mentor
+                        .clone()
+                        .or_else(|| iteration.problem.clone())
+                        .unwrap_or_else(|| "Student required mentor assistance".to_string());
+
+                    gaps.push(Gap {
+                        id: gap_id,
+                        title,
+                        location: Self::extract_location(&iteration.current_step),
+                        problem,
+                        suggested_fix,
+                        severity: GapSeverity::Major,
+                    });
+                    gap_id += 1;
+                }
+                StudentStatusInput::CannotComplete => {
+                    let title = iteration.reason.as_ref().map_or_else(
+                        || "Unable to complete step".to_string(),
+                        |r| truncate_string(r, 50),
+                    );
+
+                    let problem = iteration
+                        .reason
+                        .clone()
+                        .or_else(|| iteration.problem.clone())
+                        .unwrap_or_else(|| "Student could not proceed".to_string());
+
+                    gaps.push(Gap {
+                        id: gap_id,
+                        title,
+                        location: Self::extract_location(&iteration.current_step),
+                        problem,
+                        suggested_fix: "Verify prerequisites are documented and step is complete"
+                            .to_string(),
+                        severity: GapSeverity::Critical,
+                    });
+                    gap_id += 1;
+                }
+                StudentStatusInput::Completed => {
+                    // No gap for completed iterations
+                }
+            }
+        }
+
+        gaps
+    }
+
+    /// Finds the mentor note for a specific iteration.
+    fn find_mentor_note(&self, iteration: u32) -> Option<&MentorNoteInput> {
+        self.input
+            .mentor_notes
+            .iter()
+            .find(|n| n.iteration == iteration)
+    }
+
+    /// Extracts location information from a step description.
+    ///
+    /// Looks for line number patterns like "line 15", "L42", or "step 3"
+    /// and extracts them into a `GapLocation`.
+    fn extract_location(step: &str) -> GapLocation {
+        use regex::Regex;
+
+        // Try to extract line numbers from patterns like "line 15", "L42", etc.
+        // Using once_cell would be better but we avoid it for MSRV compliance
+        let line_patterns = [
+            r"[Ll]ine\s*(\d+)", // "line 15", "Line 15"
+            r"[Ll](\d+)",       // "L42"
+            r"#L(\d+)",         // "#L42" (GitHub-style)
+            r"[Ss]tep\s*(\d+)", // "step 3"
+            r":(\d+)",          // ":42" (filename:line)
+        ];
+
+        for pattern in &line_patterns {
+            // Regex::new should not fail for these patterns, but we handle it gracefully
+            let Ok(re) = Regex::new(pattern) else {
+                continue;
+            };
+            if let Some(caps) = re.captures(step) {
+                if let Some(num_match) = caps.get(1) {
+                    if let Ok(line_num) = num_match.as_str().parse::<u32>() {
+                        return GapLocation {
+                            line_number: Some(line_num),
+                            quote: Some(step.to_string()),
+                        };
+                    }
+                }
+            }
+        }
+
+        // No line number found, just include the step as a quote
+        GapLocation {
+            line_number: None,
+            quote: if step.is_empty() {
+                None
+            } else {
+                Some(step.to_string())
+            },
+        }
+    }
+
+    /// Builds a timeline of events from the iteration history.
+    fn build_timeline(&self) -> Vec<TimelineEntry> {
+        let mut timeline = Vec::new();
+
+        // Loop started event
+        timeline.push(TimelineEntry {
+            timestamp: self.input.started_at,
+            iteration: 0,
+            event: "Loop started".to_string(),
+            details: Some(format!("Tutorial: {}", self.input.tutorial_name)),
+        });
+
+        // Events for each iteration
+        for iteration in &self.input.history {
+            // Iteration started
+            timeline.push(TimelineEntry {
+                timestamp: iteration.started_at,
+                iteration: iteration.iteration,
+                event: format!("Iteration {} started", iteration.iteration),
+                details: Some(format!("Working on: {}", iteration.current_step)),
+            });
+
+            // Status-specific events
+            match iteration.student_status {
+                StudentStatusInput::AskMentor => {
+                    if let Some(question) = &iteration.question_for_mentor {
+                        timeline.push(TimelineEntry {
+                            timestamp: iteration.ended_at,
+                            iteration: iteration.iteration,
+                            event: format!(
+                                "Student asked mentor: {}",
+                                truncate_string(question, 60)
+                            ),
+                            details: iteration.problem.clone(),
+                        });
+                    }
+
+                    // Check for mentor response
+                    if let Some(note) = self.find_mentor_note(iteration.iteration) {
+                        timeline.push(TimelineEntry {
+                            timestamp: note.timestamp,
+                            iteration: iteration.iteration,
+                            event: "Mentor provided guidance".to_string(),
+                            details: Some(truncate_string(&note.answer, 100)),
+                        });
+                    }
+                }
+                StudentStatusInput::CannotComplete => {
+                    let reason = iteration
+                        .reason
+                        .as_ref()
+                        .map_or_else(|| "Unknown blocker".to_string(), |r| truncate_string(r, 60));
+                    timeline.push(TimelineEntry {
+                        timestamp: iteration.ended_at,
+                        iteration: iteration.iteration,
+                        event: format!("Blocker encountered: {reason}"),
+                        details: iteration.problem.clone(),
+                    });
+                }
+                StudentStatusInput::Completed => {
+                    timeline.push(TimelineEntry {
+                        timestamp: iteration.ended_at,
+                        iteration: iteration.iteration,
+                        event: "Iteration completed successfully".to_string(),
+                        details: if iteration.summary.is_empty() {
+                            None
+                        } else {
+                            Some(truncate_string(&iteration.summary, 100))
+                        },
+                    });
+                }
+            }
+        }
+
+        // Loop ended event
+        let end_event = match self.input.status {
+            ReportStatus::Completed => "Tutorial completed successfully",
+            ReportStatus::MaxIterations => "Reached maximum iterations",
+            ReportStatus::Blocker => "Blocked by unresolvable issue",
+            ReportStatus::Timeout => "Global timeout exceeded",
+            ReportStatus::Error => "Unrecoverable error occurred",
+            _ => "Loop ended",
+        };
+
+        timeline.push(TimelineEntry {
+            timestamp: self.input.ended_at,
+            iteration: self.input.iterations,
+            event: end_event.to_string(),
+            details: None,
+        });
+
+        timeline
+    }
+
+    /// Builds an audit trail from the iteration history.
+    fn build_audit_trail(&self) -> AuditTrail {
+        let mut audit = AuditTrail::new();
+
+        for iteration in &self.input.history {
+            // Add commands from this iteration
+            for cmd in &iteration.commands_run {
+                audit.commands.push(AuditCommand {
+                    command: cmd.clone(),
+                    exit_code: 0, // We don't have exit codes in the input
+                    output: String::new(),
+                    timestamp: iteration.ended_at,
+                });
+            }
+
+            // Add files from this iteration
+            for file in &iteration.files_created {
+                audit.files.push(AuditFile {
+                    path: file.clone(),
+                    operation: FileOperation::Created,
+                    timestamp: iteration.ended_at,
+                });
+            }
+        }
+
+        // LLM calls data is not available from loop history
+        // It would need to be tracked separately by the orchestrator
+
+        audit
+    }
+
+    /// Generates recommendations based on patterns in the history.
+    fn generate_recommendations(&self) -> Vec<Recommendation> {
+        let mut recommendations = Vec::new();
+        let mut priority = 1u32;
+
+        // Recommendation if multiple iterations were needed
+        if self.input.iterations > 1 {
+            recommendations.push(Recommendation {
+                priority,
+                category: "complexity".to_string(),
+                description: format!(
+                    "Tutorial required {} iterations. Consider breaking down complex steps into smaller, more manageable pieces.",
+                    self.input.iterations
+                ),
+            });
+            priority += 1;
+        }
+
+        // Recommendations for mentor consultations
+        let mentor_count = self
+            .input
+            .history
+            .iter()
+            .filter(|i| i.student_status == StudentStatusInput::AskMentor)
+            .count();
+
+        if mentor_count > 0 {
+            // Find the steps that needed mentor help
+            let steps_needing_help: Vec<&str> = self
+                .input
+                .history
+                .iter()
+                .filter(|i| i.student_status == StudentStatusInput::AskMentor)
+                .map(|i| i.current_step.as_str())
+                .collect();
+
+            let step_list = if steps_needing_help.len() <= 3 {
+                steps_needing_help.join(", ")
+            } else {
+                format!(
+                    "{}, and {} others",
+                    steps_needing_help[..2].join(", "),
+                    steps_needing_help.len() - 2
+                )
+            };
+
+            recommendations.push(Recommendation {
+                priority,
+                category: "clarity".to_string(),
+                description: format!(
+                    "Mentor was consulted {mentor_count} time(s) for: {step_list}. Add more context or examples to these steps."
+                ),
+            });
+            priority += 1;
+        }
+
+        // Recommendations for blockers
+        let blocker_count = self
+            .input
+            .history
+            .iter()
+            .filter(|i| i.student_status == StudentStatusInput::CannotComplete)
+            .count();
+
+        if blocker_count > 0 {
+            recommendations.push(Recommendation {
+                priority,
+                category: "completeness".to_string(),
+                description: format!(
+                    "Student was blocked {blocker_count} time(s). Verify all prerequisites are documented and all necessary files/code are provided."
+                ),
+            });
+            priority += 1;
+        }
+
+        // Recommendation if loop did not complete successfully
+        if self.input.status.is_failure() {
+            let status_advice = match self.input.status {
+                ReportStatus::MaxIterations => {
+                    "Tutorial could not be completed within the iteration limit. Review overall tutorial length and complexity."
+                }
+                ReportStatus::Blocker => {
+                    "An unresolvable blocker was encountered. Check for missing prerequisites or unclear instructions."
+                }
+                ReportStatus::Timeout => {
+                    "Tutorial validation exceeded the time limit. Consider simplifying or splitting the tutorial."
+                }
+                ReportStatus::Error => {
+                    "An error occurred during validation. Review the error logs for details."
+                }
+                _ => "Tutorial validation did not complete successfully.",
+            };
+
+            recommendations.push(Recommendation {
+                priority,
+                category: "outcome".to_string(),
+                description: status_advice.to_string(),
+            });
+        }
+
+        recommendations
+    }
+}
+
+/// Truncates a string to the specified maximum length, adding "..." if truncated.
+fn truncate_string(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else {
+        format!("{}...", &s[..max_len.saturating_sub(3)])
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -1168,5 +1689,266 @@ mod tests {
         assert_eq!(GapSeverity::Critical.to_string(), "Critical");
         assert_eq!(GapSeverity::Major.to_string(), "Major");
         assert_eq!(GapSeverity::Minor.to_string(), "Minor");
+    }
+
+    // ========================================================================
+    // ReportGenerator Tests
+    // ========================================================================
+
+    fn make_test_input() -> ReportInput {
+        ReportInput {
+            tutorial_name: "getting-started.md".to_string(),
+            tutorial_path: "/tutorials/getting-started.md".to_string(),
+            status: ReportStatus::Completed,
+            iterations: 2,
+            started_at: Utc::now() - chrono::Duration::seconds(120),
+            ended_at: Utc::now(),
+            history: vec![],
+            mentor_notes: vec![],
+        }
+    }
+
+    #[test]
+    fn test_report_generator_empty_history() {
+        let input = make_test_input();
+        let generator = ReportGenerator::new(input);
+        let report = generator.generate();
+
+        assert_eq!(report.tutorial_name, "getting-started.md");
+        assert_eq!(report.summary.status, ReportStatus::Completed);
+        assert_eq!(report.summary.iterations, 2);
+        assert!(report.gaps.is_empty());
+        // Timeline has start and end events
+        assert!(report.timeline.len() >= 2);
+    }
+
+    #[test]
+    fn test_report_generator_extracts_ask_mentor_gaps() {
+        let mut input = make_test_input();
+        input.history.push(IterationInput {
+            iteration: 1,
+            student_status: StudentStatusInput::AskMentor,
+            current_step: "Step 3: Configure database".to_string(),
+            problem: Some("Database connection fails".to_string()),
+            question_for_mentor: Some("How do I set up PostgreSQL?".to_string()),
+            reason: None,
+            summary: "Tried to connect but failed".to_string(),
+            files_created: vec![],
+            commands_run: vec!["psql -U postgres".to_string()],
+            started_at: Utc::now() - chrono::Duration::seconds(60),
+            ended_at: Utc::now() - chrono::Duration::seconds(30),
+        });
+        input.mentor_notes.push(MentorNoteInput {
+            iteration: 1,
+            question: "How do I set up PostgreSQL?".to_string(),
+            answer: "Install PostgreSQL first and create a database".to_string(),
+            timestamp: Utc::now() - chrono::Duration::seconds(25),
+        });
+
+        let generator = ReportGenerator::new(input);
+        let report = generator.generate();
+
+        assert_eq!(report.gaps.len(), 1);
+        let gap = &report.gaps[0];
+        assert_eq!(gap.id, 1);
+        assert_eq!(gap.severity, GapSeverity::Major);
+        assert_eq!(gap.problem, "How do I set up PostgreSQL?");
+        assert_eq!(
+            gap.suggested_fix,
+            "Install PostgreSQL first and create a database"
+        );
+    }
+
+    #[test]
+    fn test_report_generator_extracts_cannot_complete_gaps() {
+        let mut input = make_test_input();
+        input.status = ReportStatus::Blocker;
+        input.history.push(IterationInput {
+            iteration: 1,
+            student_status: StudentStatusInput::CannotComplete,
+            current_step: "Step 5: Deploy to production".to_string(),
+            problem: Some("Missing credentials".to_string()),
+            question_for_mentor: None,
+            reason: Some("AWS credentials not provided in tutorial".to_string()),
+            summary: "Cannot deploy".to_string(),
+            files_created: vec![],
+            commands_run: vec![],
+            started_at: Utc::now() - chrono::Duration::seconds(60),
+            ended_at: Utc::now() - chrono::Duration::seconds(30),
+        });
+
+        let generator = ReportGenerator::new(input);
+        let report = generator.generate();
+
+        assert_eq!(report.gaps.len(), 1);
+        let gap = &report.gaps[0];
+        assert_eq!(gap.id, 1);
+        assert_eq!(gap.severity, GapSeverity::Critical);
+        assert!(gap.problem.contains("AWS credentials"));
+    }
+
+    #[test]
+    fn test_report_generator_extract_location_line_number() {
+        // Test "line 15" pattern
+        let loc = ReportGenerator::extract_location("See line 15 for details");
+        assert_eq!(loc.line_number, Some(15));
+
+        // Test "L42" pattern
+        let loc = ReportGenerator::extract_location("Error at L42");
+        assert_eq!(loc.line_number, Some(42));
+
+        // Test "step 3" pattern
+        let loc = ReportGenerator::extract_location("Step 3: Configure database");
+        assert_eq!(loc.line_number, Some(3));
+
+        // Test no pattern
+        let loc = ReportGenerator::extract_location("Some random text");
+        assert!(loc.line_number.is_none());
+        assert_eq!(loc.quote.as_deref(), Some("Some random text"));
+    }
+
+    #[test]
+    fn test_report_generator_builds_timeline() {
+        let mut input = make_test_input();
+        input.history.push(IterationInput {
+            iteration: 1,
+            student_status: StudentStatusInput::Completed,
+            current_step: "Step 1".to_string(),
+            problem: None,
+            question_for_mentor: None,
+            reason: None,
+            summary: "Completed step 1".to_string(),
+            files_created: vec![],
+            commands_run: vec![],
+            started_at: Utc::now() - chrono::Duration::seconds(60),
+            ended_at: Utc::now() - chrono::Duration::seconds(30),
+        });
+
+        let generator = ReportGenerator::new(input);
+        let report = generator.generate();
+
+        // Should have: start, iteration start, iteration complete, end
+        assert!(report.timeline.len() >= 4);
+
+        // First event should be "Loop started"
+        assert_eq!(report.timeline[0].event, "Loop started");
+
+        // Last event should indicate completion
+        assert!(report.timeline.last().unwrap().event.contains("completed"));
+    }
+
+    #[test]
+    fn test_report_generator_builds_audit_trail() {
+        let mut input = make_test_input();
+        input.history.push(IterationInput {
+            iteration: 1,
+            student_status: StudentStatusInput::Completed,
+            current_step: "Step 1".to_string(),
+            problem: None,
+            question_for_mentor: None,
+            reason: None,
+            summary: "Created files".to_string(),
+            files_created: vec!["config.json".to_string(), "main.rs".to_string()],
+            commands_run: vec!["cargo build".to_string(), "cargo test".to_string()],
+            started_at: Utc::now() - chrono::Duration::seconds(60),
+            ended_at: Utc::now() - chrono::Duration::seconds(30),
+        });
+
+        let generator = ReportGenerator::new(input);
+        let report = generator.generate();
+
+        assert_eq!(report.audit_trail.command_count(), 2);
+        assert_eq!(report.audit_trail.file_count(), 2);
+        assert_eq!(report.audit_trail.commands[0].command, "cargo build");
+        assert_eq!(report.audit_trail.files[0].path, "config.json");
+    }
+
+    #[test]
+    fn test_report_generator_generates_recommendations() {
+        let mut input = make_test_input();
+        input.iterations = 3;
+        input.history.push(IterationInput {
+            iteration: 1,
+            student_status: StudentStatusInput::AskMentor,
+            current_step: "Step 2".to_string(),
+            problem: Some("Confused".to_string()),
+            question_for_mentor: Some("What do I do?".to_string()),
+            reason: None,
+            summary: String::new(),
+            files_created: vec![],
+            commands_run: vec![],
+            started_at: Utc::now() - chrono::Duration::seconds(60),
+            ended_at: Utc::now() - chrono::Duration::seconds(30),
+        });
+
+        let generator = ReportGenerator::new(input);
+        let report = generator.generate();
+
+        // Should have recommendations for multiple iterations and mentor consultation
+        assert!(!report.recommendations.is_empty());
+
+        // Check for complexity recommendation
+        let has_complexity_rec = report
+            .recommendations
+            .iter()
+            .any(|r| r.category == "complexity");
+        assert!(has_complexity_rec);
+
+        // Check for clarity recommendation (mentor was consulted)
+        let has_clarity_rec = report
+            .recommendations
+            .iter()
+            .any(|r| r.category == "clarity");
+        assert!(has_clarity_rec);
+    }
+
+    #[test]
+    fn test_report_generator_failure_recommendations() {
+        let mut input = make_test_input();
+        input.status = ReportStatus::MaxIterations;
+
+        let generator = ReportGenerator::new(input);
+        let report = generator.generate();
+
+        // Should have an outcome recommendation
+        let has_outcome_rec = report
+            .recommendations
+            .iter()
+            .any(|r| r.category == "outcome");
+        assert!(has_outcome_rec);
+    }
+
+    #[test]
+    fn test_truncate_string() {
+        assert_eq!(truncate_string("short", 10), "short");
+        assert_eq!(truncate_string("this is a long string", 10), "this is...");
+        assert_eq!(truncate_string("abc", 3), "abc");
+        assert_eq!(truncate_string("abcd", 3), "...");
+    }
+
+    #[test]
+    fn test_student_status_input_serialization() {
+        let completed = StudentStatusInput::Completed;
+        let json = serde_json::to_string(&completed).unwrap();
+        assert_eq!(json, r#""completed""#);
+
+        let ask_mentor = StudentStatusInput::AskMentor;
+        let json = serde_json::to_string(&ask_mentor).unwrap();
+        assert_eq!(json, r#""ask_mentor""#);
+
+        let cannot_complete = StudentStatusInput::CannotComplete;
+        let json = serde_json::to_string(&cannot_complete).unwrap();
+        assert_eq!(json, r#""cannot_complete""#);
+    }
+
+    #[test]
+    fn test_report_input_serialization() {
+        let input = make_test_input();
+        let json = serde_json::to_string(&input).unwrap();
+        assert!(json.contains("tutorial_name"));
+        assert!(json.contains("getting-started.md"));
+
+        let parsed: ReportInput = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.tutorial_name, input.tutorial_name);
     }
 }
