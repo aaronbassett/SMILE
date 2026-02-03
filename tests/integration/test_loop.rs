@@ -337,6 +337,265 @@ fn test_report_gap_counts() {
     assert!(counts.critical >= 1, "Should have at least 1 critical gap");
 }
 
+/// Full integration test that simulates the Docker-based workflow with mock LLM responses.
+///
+/// This test validates the complete workflow:
+/// 1. Programmatically starts the orchestrator HTTP server
+/// 2. Sends mock student/mentor results via HTTP to simulate wrapper callbacks
+/// 3. Verifies the loop terminates with expected status
+/// 4. Validates the generated report contains expected gaps
+///
+/// Run with: `cargo test -p smile-integration-tests test_full_loop_with_mock_llm -- --ignored`
+#[tokio::test]
+#[ignore = "Requires network port availability"]
+async fn test_full_loop_with_mock_llm() {
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+
+    // Create config for the test
+    let config = Config {
+        tutorial: "tutorial.md".to_string(),
+        llm_provider: smile_orchestrator::LlmProvider::Claude,
+        max_iterations: 5,
+        timeout: 60,
+        container_image: "smile-base:latest".to_string(),
+        student_behavior: smile_orchestrator::StudentBehavior::default(),
+        container: smile_orchestrator::ContainerConfig::default(),
+        state_file: ".smile/test-state.json".to_string(),
+        output_dir: ".".to_string(),
+    };
+
+    // Create shared loop state
+    let loop_state = Arc::new(Mutex::new(LoopState::new()));
+
+    // Create app state for the HTTP server
+    let app_state = smile_orchestrator::AppState {
+        config: config.clone(),
+        loop_state: Arc::clone(&loop_state),
+        broadcaster: smile_orchestrator::EventBroadcaster::default(),
+    };
+
+    // Create and start the HTTP server
+    let router = smile_orchestrator::create_router(app_state);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("Failed to bind to random port");
+    let addr = listener.local_addr().expect("Failed to get local address");
+    let base_url = format!("http://{addr}");
+
+    // Spawn the server
+    let server_handle = tokio::spawn(async move {
+        axum::serve(listener, router).await.ok();
+    });
+
+    // Start the loop
+    {
+        let mut state = loop_state.lock().await;
+        state.start().expect("Failed to start loop");
+    }
+
+    // Simulate the mock LLM scenario from missing_npm.json
+    let http_client = reqwest::Client::new();
+
+    // Response 1: Student asks mentor about npm not found
+    {
+        // Transition to waiting for student (simulating wrapper being invoked)
+        {
+            let mut state = loop_state.lock().await;
+            state
+                .start_waiting_for_student()
+                .expect("Failed to transition to waiting");
+        }
+
+        let response = http_client
+            .post(format!("{base_url}/api/student/result"))
+            .json(&serde_json::json!({
+                "studentOutput": {
+                    "status": "ask_mentor",
+                    "current_step": "Step 2: Initialize the Project",
+                    "attempted_actions": ["mkdir my-counter", "cd my-counter", "npm init -y"],
+                    "problem": "Command not found: npm. The system does not recognize npm as a command.",
+                    "question_for_mentor": "I tried to run 'npm init -y' but got 'command not found: npm'. How do I install npm or Node.js?",
+                    "reason": "missing_dependency",
+                    "summary": "Created directory but cannot initialize npm project",
+                    "files_created": ["my-counter/"],
+                    "commands_run": ["mkdir my-counter", "cd my-counter", "npm init -y"]
+                },
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            }))
+            .send()
+            .await
+            .expect("Failed to send student result");
+
+        assert!(
+            response.status().is_success(),
+            "Student result request failed: {}",
+            response.status()
+        );
+
+        // Verify state transitioned to mentor
+        let state = loop_state.lock().await;
+        assert_eq!(
+            state.status,
+            LoopStatus::RunningMentor,
+            "Expected RunningMentor after AskMentor"
+        );
+    }
+
+    // Response 2: Mentor provides guidance
+    {
+        // Transition to waiting for mentor
+        {
+            let mut state = loop_state.lock().await;
+            state
+                .start_waiting_for_mentor()
+                .expect("Failed to transition to waiting for mentor");
+        }
+
+        let response = http_client
+            .post(format!("{base_url}/api/mentor/result"))
+            .json(&serde_json::json!({
+                "mentorOutput": "You need to install Node.js first. Visit https://nodejs.org or use your package manager.",
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            }))
+            .send()
+            .await
+            .expect("Failed to send mentor result");
+
+        assert!(
+            response.status().is_success(),
+            "Mentor result request failed: {}",
+            response.status()
+        );
+
+        // Verify state transitioned back to student
+        let state = loop_state.lock().await;
+        assert_eq!(
+            state.status,
+            LoopStatus::RunningStudent,
+            "Expected RunningStudent after mentor response"
+        );
+        assert_eq!(state.iteration, 2, "Expected iteration 2");
+    }
+
+    // Response 3: Student completes after mentor help (skip ahead to completion)
+    {
+        // Transition to waiting for student
+        {
+            let mut state = loop_state.lock().await;
+            state
+                .start_waiting_for_student()
+                .expect("Failed to transition to waiting");
+        }
+
+        let response = http_client
+            .post(format!("{base_url}/api/student/result"))
+            .json(&serde_json::json!({
+                "studentOutput": {
+                    "status": "completed",
+                    "current_step": "Step 6: Install Globally",
+                    "attempted_actions": ["All steps completed"],
+                    "summary": "Tutorial completed successfully after installing Node.js",
+                    "files_created": [],
+                    "commands_run": ["npm link"]
+                },
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            }))
+            .send()
+            .await
+            .expect("Failed to send final student result");
+
+        assert!(
+            response.status().is_success(),
+            "Final student result request failed"
+        );
+    }
+
+    // Verify final state
+    let final_state = loop_state.lock().await;
+    assert_eq!(
+        final_state.status,
+        LoopStatus::Completed,
+        "Expected Completed status"
+    );
+    assert!(final_state.iteration >= 2, "Expected at least 2 iterations");
+    assert_eq!(
+        final_state.mentor_notes.len(),
+        1,
+        "Expected 1 mentor consultation"
+    );
+    assert!(
+        !final_state.history.is_empty(),
+        "Expected iteration history"
+    );
+
+    // Generate report and validate gaps
+    let report_input = ReportInput {
+        tutorial_name: "sample-tutorial".to_string(),
+        tutorial_path: "tests/integration/fixtures/sample-tutorial/tutorial.md".to_string(),
+        status: ReportStatus::Completed,
+        iterations: final_state.iteration,
+        started_at: final_state.started_at,
+        ended_at: chrono::Utc::now(),
+        history: final_state
+            .history
+            .iter()
+            .map(|record| IterationInput {
+                iteration: record.iteration,
+                student_status: match record.student_output.status {
+                    smile_orchestrator::StudentStatus::Completed => StudentStatusInput::Completed,
+                    smile_orchestrator::StudentStatus::AskMentor => StudentStatusInput::AskMentor,
+                    smile_orchestrator::StudentStatus::CannotComplete => {
+                        StudentStatusInput::CannotComplete
+                    }
+                },
+                current_step: record.student_output.current_step.clone(),
+                problem: record.student_output.problem.clone(),
+                question_for_mentor: record.student_output.question_for_mentor.clone(),
+                reason: record.student_output.reason.clone(),
+                summary: record.student_output.summary.clone(),
+                files_created: record.student_output.files_created.clone(),
+                commands_run: record.student_output.commands_run.clone(),
+                started_at: record.started_at,
+                ended_at: record.ended_at,
+            })
+            .collect(),
+        mentor_notes: final_state
+            .mentor_notes
+            .iter()
+            .map(|note| MentorNoteInput {
+                iteration: note.iteration,
+                question: note.question.clone(),
+                answer: note.answer.clone(),
+                timestamp: note.timestamp,
+            })
+            .collect(),
+    };
+
+    let generator = ReportGenerator::new(report_input);
+    let report = generator.generate();
+
+    // Validate gaps were detected
+    assert!(
+        !report.gaps.is_empty(),
+        "Expected at least one gap to be detected"
+    );
+
+    // The first iteration had a missing dependency issue
+    let has_missing_dep_gap = report.gaps.iter().any(|gap| {
+        gap.problem.to_lowercase().contains("npm")
+            || gap.problem.to_lowercase().contains("node")
+            || gap.problem.to_lowercase().contains("command not found")
+    });
+    assert!(
+        has_missing_dep_gap,
+        "Expected a gap related to missing npm/Node.js dependency"
+    );
+
+    // Cleanup
+    server_handle.abort();
+}
+
 /// Full integration test that requires Docker.
 ///
 /// This test is ignored by default as it requires:
