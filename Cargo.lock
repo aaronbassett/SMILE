@@ -1325,6 +1325,7 @@ name = "smile-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "axum",
  "clap",
  "smile-container",
  "smile-orchestrator",
@@ -1372,6 +1373,7 @@ name = "smile-report"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "regex",
  "serde",
  "serde_json",
  "thiserror",
