@@ -308,10 +308,10 @@ Shared infrastructure required by all user stories.
 - [x] T160 [GIT] Commit: update codebase documents for phase 8 (skipped - not configured)
 - [x] T161 [US8] Review retro/P8.md and extract critical learnings to CLAUDE.md (no critical learnings - phase-specific)
 - [x] T162 [GIT] Commit: finalize phase 8 retro
-- [ ] T163 [GIT] Push branch to origin (ensure pre-push hooks pass)
-- [ ] T164 [GIT] Create/update PR to main with phase summary
-- [ ] T165 [GIT] Verify all CI checks pass
-- [ ] T166 [GIT] Report PR ready status
+- [x] T163 [GIT] Push branch to origin (ensure pre-push hooks pass)
+- [x] T164 [GIT] Create/update PR to main with phase summary (PR #1 updated with comment)
+- [x] T165 [GIT] Verify all CI checks pass (all CI checks pass, integration tests skip as expected)
+- [x] T166 [GIT] Report PR ready status
 
 ---
 
