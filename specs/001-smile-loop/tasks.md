@@ -342,10 +342,10 @@ Shared infrastructure required by all user stories.
 - [x] T181 [GIT] Commit: update codebase documents for phase 9 (skipped - not configured)
 - [x] T182 [US10] Review retro/P9.md and extract critical learnings to CLAUDE.md (no critical learnings - patterns are phase-specific)
 - [x] T183 [GIT] Commit: finalize phase 9 retro
-- [ ] T184 [GIT] Push branch to origin (ensure pre-push hooks pass)
-- [ ] T185 [GIT] Create/update PR to main with phase summary
-- [ ] T186 [GIT] Verify all CI checks pass
-- [ ] T187 [GIT] Report PR ready status
+- [x] T184 [GIT] Push branch to origin (ensure pre-push hooks pass)
+- [x] T185 [GIT] Create/update PR to main with phase summary
+- [x] T186 [GIT] Verify all CI checks pass
+- [x] T187 [GIT] Report PR ready status
 
 ---
 
