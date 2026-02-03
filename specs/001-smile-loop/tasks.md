@@ -324,10 +324,10 @@ Shared infrastructure required by all user stories.
 - [x] T167 [GIT] Verify working tree is clean before starting Phase 9
 - [x] T168 [GIT] Pull and rebase on origin/main if needed (no rebase needed)
 - [x] T169 [US10] Create retro/P9.md for this phase
-- [ ] T170 [GIT] Commit: initialize phase 9 retro
+- [x] T170 [GIT] Commit: initialize phase 9 retro
 
 ### Implementation
-- [ ] T171 [US10] Create Report, Gap, and ReportSummary types in crates/smile-report/src/lib.rs (use devs:rust-dev agent)
+- [x] T171 [US10] Create Report, Gap, and ReportSummary types in crates/smile-report/src/lib.rs (use devs:rust-dev agent)
 - [ ] T172 [GIT] Commit: add report types
 - [ ] T173 [P] [US10] Implement Markdown report generation in crates/smile-report/src/markdown.rs (use devs:rust-dev agent)
 - [ ] T174 [P] [US10] Implement JSON report generation in crates/smile-report/src/json.rs (use devs:rust-dev agent)
