@@ -7,6 +7,7 @@ pub mod config;
 pub mod error;
 pub mod loop_state;
 pub mod tutorial;
+pub mod websocket;
 
 pub use api::{
     create_router, AppState, ErrorResponse, MentorResultRequest, MentorResultResponse, NextAction,
@@ -19,3 +20,7 @@ pub use loop_state::{
     TerminationReason, STATE_VERSION,
 };
 pub use tutorial::{ImageFormat, Tutorial, TutorialImage, MAX_TUTORIAL_SIZE};
+pub use websocket::{
+    ws_handler, ConnectedPayload, ErrorPayload, EventBroadcaster, IterationStartPayload,
+    LoopCompletePayload, LoopEvent, MentorOutputPayload, StudentOutputPayload, WsState,
+};
