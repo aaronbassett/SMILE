@@ -219,10 +219,10 @@ Shared infrastructure required by all user stories.
 - [x] T101 [GIT] Verify working tree is clean before starting Phase 6
 - [x] T102 [GIT] Pull and rebase on origin/main if needed
 - [x] T103 [US5] Create retro/P6.md for this phase
-- [ ] T104 [GIT] Commit: initialize phase 6 retro
+- [x] T104 [GIT] Commit: initialize phase 6 retro
 
 ### Implementation
-- [ ] T105 [P] [US5] Create prompt construction module in python/smile_wrappers/prompts.py (use devs:python-expert agent)
+- [x] T105 [P] [US5] Create prompt construction module in python/smile_wrappers/prompts.py (use devs:python-expert agent)
 - [ ] T106 [GIT] Commit: add prompt construction
 - [ ] T107 [US5] Implement Student wrapper with LLM CLI invocation in python/smile_wrappers/student.py (use devs:python-expert agent)
 - [ ] T108 [GIT] Commit: implement student wrapper
