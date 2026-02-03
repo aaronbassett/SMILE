@@ -6,7 +6,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use clap::Parser;
-use smile_orchestrator::Config;
+use smile_orchestrator::{Config, Tutorial};
 use tracing_subscriber::EnvFilter;
 
 /// SMILE Loop - Tutorial Validation Tool
@@ -89,9 +89,34 @@ fn main() -> ExitCode {
     println!("  Timeout: {}s", config.timeout);
     println!("  Container image: {}", config.container_image);
 
+    // Load tutorial file with images
+    tracing::info!(tutorial = %config.tutorial, "Loading tutorial");
+    let tutorial = match Tutorial::load_with_images(&config.tutorial) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("Error: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    // Print tutorial info
+    println!();
+    println!("Tutorial loaded:");
+    println!("  Path: {}", tutorial.path.display());
+    println!("  Size: {} bytes", tutorial.size_bytes);
+    println!("  Images: {}", tutorial.images.len());
+
+    for img in &tutorial.images {
+        tracing::debug!(
+            reference = %img.reference,
+            format = %img.format,
+            size = img.data.len(),
+            "Image loaded"
+        );
+    }
+
     // TODO: Actual orchestration will be implemented in Phase 8
     // This will involve:
-    // - Loading and validating the tutorial file
     // - Setting up the container environment
     // - Running the Student/Mentor loop
     // - Generating reports
