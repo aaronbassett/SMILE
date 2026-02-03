@@ -338,10 +338,10 @@ Shared infrastructure required by all user stories.
 - [x] T179 [GIT] Commit: integrate report generation
 
 ### Phase Completion
-- [ ] T180 [US10] Run /sdd:map incremental for Phase 9 changes
-- [ ] T181 [GIT] Commit: update codebase documents for phase 9
-- [ ] T182 [US10] Review retro/P9.md and extract critical learnings to CLAUDE.md (conservative)
-- [ ] T183 [GIT] Commit: finalize phase 9 retro
+- [x] T180 [US10] Run /sdd:map incremental for Phase 9 changes (skipped - not configured)
+- [x] T181 [GIT] Commit: update codebase documents for phase 9 (skipped - not configured)
+- [x] T182 [US10] Review retro/P9.md and extract critical learnings to CLAUDE.md (no critical learnings - patterns are phase-specific)
+- [x] T183 [GIT] Commit: finalize phase 9 retro
 - [ ] T184 [GIT] Push branch to origin (ensure pre-push hooks pass)
 - [ ] T185 [GIT] Create/update PR to main with phase summary
 - [ ] T186 [GIT] Verify all CI checks pass
