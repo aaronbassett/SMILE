@@ -294,20 +294,20 @@ Shared infrastructure required by all user stories.
 - [x] T148 [GIT] Commit: add loop state types
 - [x] T149 [US8] Implement loop state machine with transitions in crates/smile-orchestrator/src/loop_state.rs (use devs:rust-dev agent)
 - [x] T150 [GIT] Commit: implement state machine
-- [ ] T151 [P] [US8] Implement HTTP API endpoints per contracts/orchestrator-api.yaml in crates/smile-orchestrator/src/api.rs (use devs:rust-dev agent)
-- [ ] T152 [GIT] Commit: add HTTP API endpoints
-- [ ] T153 [US8] Implement state persistence to JSON file in crates/smile-orchestrator/src/loop_state.rs (use devs:rust-dev agent)
-- [ ] T154 [GIT] Commit: add state persistence
-- [ ] T155 [US8] Implement termination conditions (max iterations, timeout, blocker) in crates/smile-orchestrator/src/loop_state.rs (use devs:rust-dev agent)
-- [ ] T156 [GIT] Commit: add termination conditions
-- [ ] T157 [US8] Integrate loop into CLI with container management in crates/smile-cli/src/main.rs (use devs:rust-dev agent)
-- [ ] T158 [GIT] Commit: integrate loop in CLI
+- [x] T151 [P] [US8] Implement HTTP API endpoints per contracts/orchestrator-api.yaml in crates/smile-orchestrator/src/api.rs (use devs:rust-dev agent)
+- [x] T152 [GIT] Commit: add HTTP API endpoints
+- [x] T153 [US8] Implement state persistence to JSON file in crates/smile-orchestrator/src/loop_state.rs (use devs:rust-dev agent)
+- [x] T154 [GIT] Commit: add state persistence
+- [x] T155 [US8] Implement termination conditions (max iterations, timeout, blocker) in crates/smile-orchestrator/src/loop_state.rs (use devs:rust-dev agent)
+- [x] T156 [GIT] Commit: add termination conditions
+- [x] T157 [US8] Integrate loop into CLI with container management in crates/smile-cli/src/main.rs (use devs:rust-dev agent)
+- [x] T158 [GIT] Commit: integrate loop in CLI
 
 ### Phase Completion
-- [ ] T159 [US8] Run /sdd:map incremental for Phase 8 changes
-- [ ] T160 [GIT] Commit: update codebase documents for phase 8
-- [ ] T161 [US8] Review retro/P8.md and extract critical learnings to CLAUDE.md (conservative)
-- [ ] T162 [GIT] Commit: finalize phase 8 retro
+- [x] T159 [US8] Run /sdd:map incremental for Phase 8 changes (skipped - not configured)
+- [x] T160 [GIT] Commit: update codebase documents for phase 8 (skipped - not configured)
+- [x] T161 [US8] Review retro/P8.md and extract critical learnings to CLAUDE.md (no critical learnings - phase-specific)
+- [x] T162 [GIT] Commit: finalize phase 8 retro
 - [ ] T163 [GIT] Push branch to origin (ensure pre-push hooks pass)
 - [ ] T164 [GIT] Create/update PR to main with phase summary
 - [ ] T165 [GIT] Verify all CI checks pass
