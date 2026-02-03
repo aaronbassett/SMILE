@@ -5,6 +5,7 @@ members = [
     "crates/smile-orchestrator",
     "crates/smile-container",
     "crates/smile-report",
+    "tests/integration",
 ]
 
 [workspace.package]
