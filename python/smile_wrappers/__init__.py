@@ -1,6 +1,14 @@
 """SMILE Wrappers - Student and Mentor agent wrappers for SMILE Loop."""
 
 from smile_wrappers.config import Config, LlmProvider, PatienceLevel, StudentBehavior
+from smile_wrappers.mentor import (
+    MentorOrchestratorClient,
+    MentorResultRequest,
+    MentorResultResponse,
+    MentorWrapper,
+    StuckContext,
+    mentor_main,
+)
 from smile_wrappers.output import (
     OutputParseError,
     OutputParser,
@@ -34,6 +42,10 @@ __all__ = [
     "LlmParseError",
     "LlmProvider",
     "LlmTimeoutError",
+    "MentorOrchestratorClient",
+    "MentorResultRequest",
+    "MentorResultResponse",
+    "MentorWrapper",
     "NextAction",
     "OrchestratorCallbackError",
     "OrchestratorClient",
@@ -41,6 +53,7 @@ __all__ = [
     "OutputParser",
     "PatienceLevel",
     "StuckCondition",
+    "StuckContext",
     "StuckDetector",
     "StudentBehavior",
     "StudentOutput",
@@ -48,5 +61,6 @@ __all__ = [
     "build_mentor_prompt",
     "build_student_prompt",
     "get_student_output_schema",
+    "mentor_main",
     "validate_student_output",
 ]
