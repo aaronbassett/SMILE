@@ -13,15 +13,10 @@
 //! # Example
 //!
 //! ```no_run
-//! use smile_orchestrator::{AppState, Config, LoopState, create_router};
-//! use std::sync::Arc;
-//! use tokio::sync::Mutex;
+//! use smile_orchestrator::{AppState, Config, create_router};
 //!
 //! # async fn example() {
-//! let state = AppState {
-//!     config: Config::default(),
-//!     loop_state: Arc::new(Mutex::new(LoopState::new())),
-//! };
+//! let state = AppState::new(Config::default());
 //!
 //! let router = create_router(state);
 //! let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
@@ -47,6 +42,7 @@ use tower_http::{
 };
 use tracing::{info, warn};
 
+use crate::websocket::{ws_handler, EventBroadcaster, LoopEvent, WsState};
 use crate::{Config, LoopState, LoopStatus, StudentOutput};
 
 // ============================================================================
@@ -141,17 +137,21 @@ pub struct AppState {
     pub config: Config,
     /// Current state of the SMILE loop.
     pub loop_state: Arc<Mutex<LoopState>>,
+    /// Event broadcaster for WebSocket clients.
+    pub broadcaster: EventBroadcaster,
 }
 
 impl AppState {
     /// Creates a new `AppState` with the given configuration.
     ///
-    /// Initializes the loop state to `Starting`.
+    /// Initializes the loop state to `Starting` and creates an event broadcaster
+    /// with the default capacity (100 events).
     #[must_use]
     pub fn new(config: Config) -> Self {
         Self {
             config,
             loop_state: Arc::new(Mutex::new(LoopState::new())),
+            broadcaster: EventBroadcaster::default(),
         }
     }
 
@@ -163,6 +163,22 @@ impl AppState {
         Self {
             config,
             loop_state: Arc::new(Mutex::new(loop_state)),
+            broadcaster: EventBroadcaster::default(),
+        }
+    }
+
+    /// Creates a new `AppState` with custom broadcaster capacity.
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - The orchestrator configuration
+    /// * `capacity` - The event buffer capacity for WebSocket clients
+    #[must_use]
+    pub fn with_capacity(config: Config, capacity: usize) -> Self {
+        Self {
+            config,
+            loop_state: Arc::new(Mutex::new(LoopState::new())),
+            broadcaster: EventBroadcaster::new(capacity),
         }
     }
 }
@@ -197,7 +213,7 @@ impl IntoResponse for ApiError {
 // Router Setup
 // ============================================================================
 
-/// Creates the HTTP router with all API endpoints.
+/// Creates the HTTP router with all API endpoints and WebSocket support.
 ///
 /// # Arguments
 ///
@@ -207,6 +223,7 @@ impl IntoResponse for ApiError {
 ///
 /// An axum `Router` configured with:
 /// - All API routes under `/api`
+/// - WebSocket endpoint at `/ws`
 /// - CORS middleware for development
 /// - Tracing middleware for request logging
 pub fn create_router(state: AppState) -> Router {
@@ -216,19 +233,34 @@ pub fn create_router(state: AppState) -> Router {
         .allow_methods(Any)
         .allow_headers(Any);
 
-    // Build the API routes
+    // Create shared state
+    let app_state = Arc::new(state);
+
+    // Create WebSocket state sharing the loop_state and broadcaster
+    let ws_state = Arc::new(WsState {
+        broadcaster: app_state.broadcaster.clone(),
+        loop_state: Arc::clone(&app_state.loop_state),
+    });
+
+    // Build the API routes with AppState
     let api_routes = Router::new()
         .route("/student/result", post(handle_student_result))
         .route("/mentor/result", post(handle_mentor_result))
         .route("/status", get(handle_status))
-        .route("/stop", post(handle_stop));
+        .route("/stop", post(handle_stop))
+        .with_state(app_state);
 
-    // Combine with state and middleware
+    // Build WebSocket route with WsState
+    let ws_routes = Router::new()
+        .route("/ws", get(ws_handler))
+        .with_state(ws_state);
+
+    // Combine routes with middleware
     Router::new()
         .nest("/api", api_routes)
+        .merge(ws_routes)
         .layer(TraceLayer::new_for_http())
         .layer(cors)
-        .with_state(Arc::new(state))
 }
 
 // ============================================================================
@@ -238,6 +270,7 @@ pub fn create_router(state: AppState) -> Router {
 /// Handler for `POST /api/student/result`.
 ///
 /// Processes the student agent's result and transitions the loop state.
+/// Broadcasts `student_output` and optionally `loop_complete` events.
 async fn handle_student_result(
     State(state): State<Arc<AppState>>,
     Json(request): Json<StudentResultRequest>,
@@ -247,6 +280,11 @@ async fn handle_student_result(
         step = %request.student_output.current_step,
         "Received student result"
     );
+
+    // Capture output data for event before moving
+    let student_status = request.student_output.status;
+    let student_summary = request.student_output.summary.clone();
+    let student_step = request.student_output.current_step.clone();
 
     let mut loop_state = state.loop_state.lock().await;
 
@@ -267,8 +305,24 @@ async fn handle_student_result(
         .receive_student_result(request.student_output, state.config.max_iterations)
         .map_err(|e| ApiError::StateTransition(e.to_string()))?;
 
+    // Broadcast student_output event
+    state.broadcaster.send(LoopEvent::student_output(
+        student_status,
+        student_summary,
+        student_step,
+    ));
+
     // Determine next action based on new state
     let next_action = if loop_state.is_terminal() {
+        // Broadcast loop_complete event
+        let summary = loop_state
+            .termination_summary(state.config.max_iterations, state.config.timeout)
+            .unwrap_or_else(|| "Loop terminated".to_string());
+        state.broadcaster.send(LoopEvent::loop_complete(
+            loop_state.status,
+            summary,
+            loop_state.iteration,
+        ));
         NextAction::Stop
     } else {
         NextAction::Continue
@@ -289,6 +343,7 @@ async fn handle_student_result(
 /// Handler for `POST /api/mentor/result`.
 ///
 /// Processes the mentor agent's result and transitions the loop state.
+/// Broadcasts `mentor_output` and `iteration_start` events.
 async fn handle_mentor_result(
     State(state): State<Arc<AppState>>,
     Json(request): Json<MentorResultRequest>,
@@ -297,6 +352,9 @@ async fn handle_mentor_result(
         output_len = request.mentor_output.len(),
         "Received mentor result"
     );
+
+    // Capture notes for event
+    let mentor_notes = request.mentor_output.clone();
 
     let mut loop_state = state.loop_state.lock().await;
 
@@ -323,10 +381,19 @@ async fn handle_mentor_result(
         .receive_mentor_result(request.mentor_output, question)
         .map_err(|e| ApiError::StateTransition(e.to_string()))?;
 
+    // Broadcast mentor_output event
+    state
+        .broadcaster
+        .send(LoopEvent::mentor_output(mentor_notes));
+
     // Determine next action based on new state
     let next_action = if loop_state.is_terminal() {
         NextAction::Stop
     } else {
+        // Starting a new iteration - broadcast iteration_start
+        state
+            .broadcaster
+            .send(LoopEvent::iteration_start(loop_state.iteration));
         NextAction::Continue
     };
 
@@ -354,11 +421,15 @@ async fn handle_status(State(state): State<Arc<AppState>>) -> Json<LoopState> {
 /// Handler for `POST /api/stop`.
 ///
 /// Forces the loop into an error state with the given reason.
+/// Broadcasts `error` event.
 async fn handle_stop(
     State(state): State<Arc<AppState>>,
     Json(request): Json<StopRequest>,
 ) -> Result<Json<StopResponse>, ApiError> {
     info!(reason = %request.reason, "Stop request received");
+
+    // Capture reason for event
+    let error_reason = request.reason.clone();
 
     let mut loop_state = state.loop_state.lock().await;
 
@@ -378,6 +449,9 @@ async fn handle_stop(
     loop_state
         .error(request.reason)
         .map_err(|e| ApiError::StateTransition(e.to_string()))?;
+
+    // Broadcast error event
+    state.broadcaster.send(LoopEvent::error(&error_reason));
 
     info!(final_status = %loop_state.status, "Loop stopped");
 
