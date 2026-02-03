@@ -1,0 +1,76 @@
+---
+source: crates/smile-report/src/markdown.rs
+expression: markdown
+---
+# SMILE Validation Report: getting-started.md
+
+## Summary
+
+| Metric | Value |
+|--------|-------|
+| Status | Tutorial completed successfully |
+| Iterations | 5 |
+| Duration | 5m 32s |
+| Tutorial | /tutorials/getting-started.md |
+| Gaps Found | 3 (&#128308; 1 critical, &#128992; 1 major, &#128993; 1 minor) |
+
+## Documentation Gaps
+
+### &#128308; Critical Gaps
+
+#### Gap #1: Missing package.json
+
+**Location**: Line 15 | `Run npm install`
+**Problem**: The tutorial instructs to run npm install but package.json is not provided
+**Suggested Fix**: Add package.json contents before the install step
+
+### &#128992; Major Gaps
+
+#### Gap #2: Unclear environment variable
+
+**Location**: Line 42
+**Problem**: DATABASE\_URL is referenced but not explained
+**Suggested Fix**: Add a section explaining required environment variables
+
+### &#128993; Minor Gaps
+
+#### Gap #3: Typo in command
+
+**Location**: `npm rn dev`
+**Problem**: Command has a typo
+**Suggested Fix**: Change 'npm rn dev' to 'npm run dev'
+
+## Timeline
+
+| Time | Iteration | Event | Details |
+|------|-----------|-------|---------|
+| 2026-01-15 10:30:00 UTC | #1 | Student started | Beginning tutorial |
+| 2026-01-15 10:31:00 UTC | #2 | Mentor consulted |  |
+
+## Audit Trail
+
+### Commands Executed
+
+| Time | Command | Exit | Output |
+|------|---------|------|--------|
+| 2026-01-15 10:30:10 UTC | `npm install` | 1 | npm ERR\! missing package.json |
+| 2026-01-15 10:32:00 UTC | `npm run dev` | 0 | Server started on port 3000 |
+
+### Files Modified
+
+| Time | Operation | Path |
+|------|-----------|------|
+| 2026-01-15 10:30:30 UTC | created | package.json |
+| 2026-01-15 10:31:30 UTC | modified | src/index.js |
+
+### LLM Calls
+
+| Time | Provider | Tokens | Duration |
+|------|----------|--------|----------|
+| 2026-01-15 10:30:05 UTC | claude | 1500+500 | 2500ms |
+| 2026-01-15 10:31:05 UTC | claude | 800+200 | 1200ms |
+
+## Recommendations
+
+1. **[completeness]** Add all prerequisite files to the tutorial
+2. **[clarity]** Explain environment variables in a dedicated section

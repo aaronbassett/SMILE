@@ -1,0 +1,41 @@
+---
+source: crates/smile-report/src/markdown.rs
+expression: markdown
+---
+# SMILE Validation Report: 
+
+## Summary
+
+| Metric | Value |
+|--------|-------|
+| Status | Loop is initializing |
+| Iterations | 0 |
+| Duration | 0s |
+| Tutorial |  |
+| Gaps Found | 0 (&#128308; 0 critical, &#128992; 0 major, &#128993; 0 minor) |
+
+## Documentation Gaps
+
+*No documentation gaps identified.*
+
+## Timeline
+
+*No timeline events recorded.*
+
+## Audit Trail
+
+### Commands Executed
+
+*No commands executed.*
+
+### Files Modified
+
+*No files modified.*
+
+### LLM Calls
+
+*No LLM calls made.*
+
+## Recommendations
+
+*No specific recommendations.*

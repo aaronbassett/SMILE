@@ -813,4 +813,219 @@ mod tests {
         assert!(minor.contains('1'));
         assert!(minor.contains("&#128993;"));
     }
+
+    // ========================================================================
+    // Snapshot Tests
+    // ========================================================================
+    //
+    // These tests use insta for snapshot testing to verify the full
+    // markdown report structure. Timestamps are redacted to ensure
+    // deterministic test results.
+
+    /// Creates a report with fixed timestamps for deterministic snapshot tests.
+    #[allow(clippy::too_many_lines)]
+    fn deterministic_sample_report() -> Report {
+        use chrono::TimeZone;
+
+        // Use fixed timestamps for deterministic snapshots
+        let fixed_time = Utc.with_ymd_and_hms(2026, 1, 15, 10, 30, 0).unwrap();
+
+        Report {
+            tutorial_name: "getting-started.md".to_string(),
+            summary: ReportSummary {
+                status: ReportStatus::Completed,
+                iterations: 5,
+                duration_seconds: 332,
+                tutorial_path: "/tutorials/getting-started.md".to_string(),
+            },
+            gaps: vec![
+                Gap {
+                    id: 1,
+                    title: "Missing package.json".to_string(),
+                    location: GapLocation::at_line_with_quote(15, "Run npm install"),
+                    problem:
+                        "The tutorial instructs to run npm install but package.json is not provided"
+                            .to_string(),
+                    suggested_fix: "Add package.json contents before the install step".to_string(),
+                    severity: GapSeverity::Critical,
+                },
+                Gap {
+                    id: 2,
+                    title: "Unclear environment variable".to_string(),
+                    location: GapLocation::at_line(42),
+                    problem: "DATABASE_URL is referenced but not explained".to_string(),
+                    suggested_fix: "Add a section explaining required environment variables"
+                        .to_string(),
+                    severity: GapSeverity::Major,
+                },
+                Gap {
+                    id: 3,
+                    title: "Typo in command".to_string(),
+                    location: GapLocation::with_quote("npm rn dev"),
+                    problem: "Command has a typo".to_string(),
+                    suggested_fix: "Change 'npm rn dev' to 'npm run dev'".to_string(),
+                    severity: GapSeverity::Minor,
+                },
+            ],
+            timeline: vec![
+                TimelineEntry {
+                    timestamp: fixed_time,
+                    iteration: 1,
+                    event: "Student started".to_string(),
+                    details: Some("Beginning tutorial".to_string()),
+                },
+                TimelineEntry {
+                    timestamp: fixed_time + chrono::Duration::seconds(60),
+                    iteration: 2,
+                    event: "Mentor consulted".to_string(),
+                    details: None,
+                },
+            ],
+            audit_trail: AuditTrail {
+                commands: vec![
+                    AuditCommand {
+                        command: "npm install".to_string(),
+                        exit_code: 1,
+                        output: "npm ERR! missing package.json".to_string(),
+                        timestamp: fixed_time + chrono::Duration::seconds(10),
+                    },
+                    AuditCommand {
+                        command: "npm run dev".to_string(),
+                        exit_code: 0,
+                        output: "Server started on port 3000".to_string(),
+                        timestamp: fixed_time + chrono::Duration::seconds(120),
+                    },
+                ],
+                files: vec![
+                    AuditFile {
+                        path: "package.json".to_string(),
+                        operation: crate::FileOperation::Created,
+                        timestamp: fixed_time + chrono::Duration::seconds(30),
+                    },
+                    AuditFile {
+                        path: "src/index.js".to_string(),
+                        operation: crate::FileOperation::Modified,
+                        timestamp: fixed_time + chrono::Duration::seconds(90),
+                    },
+                ],
+                llm_calls: vec![
+                    AuditLlmCall {
+                        provider: "claude".to_string(),
+                        prompt_tokens: 1500,
+                        completion_tokens: 500,
+                        duration_ms: 2500,
+                        timestamp: fixed_time + chrono::Duration::seconds(5),
+                    },
+                    AuditLlmCall {
+                        provider: "claude".to_string(),
+                        prompt_tokens: 800,
+                        completion_tokens: 200,
+                        duration_ms: 1200,
+                        timestamp: fixed_time + chrono::Duration::seconds(65),
+                    },
+                ],
+            },
+            recommendations: vec![
+                Recommendation::new(
+                    1,
+                    "completeness",
+                    "Add all prerequisite files to the tutorial",
+                ),
+                Recommendation::new(
+                    2,
+                    "clarity",
+                    "Explain environment variables in a dedicated section",
+                ),
+            ],
+        }
+    }
+
+    /// Creates an empty report for snapshot testing.
+    fn empty_sample_report() -> Report {
+        Report::default()
+    }
+
+    /// Creates a report with only critical gaps for snapshot testing.
+    fn critical_gaps_only_report() -> Report {
+        use chrono::TimeZone;
+        let fixed_time = Utc.with_ymd_and_hms(2026, 1, 15, 10, 30, 0).unwrap();
+
+        Report {
+            tutorial_name: "broken-tutorial.md".to_string(),
+            summary: ReportSummary {
+                status: ReportStatus::Blocker,
+                iterations: 1,
+                duration_seconds: 45,
+                tutorial_path: "/tutorials/broken-tutorial.md".to_string(),
+            },
+            gaps: vec![
+                Gap {
+                    id: 1,
+                    title: "Missing Docker prerequisite".to_string(),
+                    location: GapLocation::at_line(5),
+                    problem: "Docker is not installed but the tutorial requires Docker commands"
+                        .to_string(),
+                    suggested_fix: "Add Docker installation instructions as a prerequisite"
+                        .to_string(),
+                    severity: GapSeverity::Critical,
+                },
+                Gap {
+                    id: 2,
+                    title: "Invalid configuration file".to_string(),
+                    location: GapLocation::with_quote("config.yaml"),
+                    problem: "The config.yaml file referenced does not exist".to_string(),
+                    suggested_fix: "Provide the complete config.yaml file contents".to_string(),
+                    severity: GapSeverity::Critical,
+                },
+            ],
+            timeline: vec![TimelineEntry {
+                timestamp: fixed_time,
+                iteration: 1,
+                event: "Blocker encountered".to_string(),
+                details: Some("Cannot proceed without Docker".to_string()),
+            }],
+            audit_trail: AuditTrail::default(),
+            recommendations: vec![Recommendation::new(
+                1,
+                "prerequisites",
+                "Verify all prerequisites are clearly documented at the start of the tutorial",
+            )],
+        }
+    }
+
+    /// Generates markdown without the footer (which has dynamic timestamp).
+    fn generate_without_footer(report: &Report) -> String {
+        let generator = MarkdownGenerator::new(report);
+        let mut output = String::new();
+
+        generator.write_title(&mut output);
+        generator.write_summary(&mut output);
+        generator.write_gaps(&mut output);
+        generator.write_timeline(&mut output);
+        generator.write_audit_trail(&mut output);
+        generator.write_recommendations(&mut output);
+
+        output
+    }
+
+    #[test]
+    fn test_snapshot_full_report() {
+        let report = deterministic_sample_report();
+        let markdown = generate_without_footer(&report);
+        insta::assert_snapshot!("full_report", markdown);
+    }
+
+    #[test]
+    fn test_snapshot_empty_report() {
+        let report = empty_sample_report();
+        let markdown = generate_without_footer(&report);
+        insta::assert_snapshot!("empty_report", markdown);
+    }
+
+    #[test]
+    fn test_snapshot_critical_gaps_only() {
+        let report = critical_gaps_only_report();
+        let markdown = generate_without_footer(&report);
+        insta::assert_snapshot!("critical_gaps_only", markdown);
+    }
 }

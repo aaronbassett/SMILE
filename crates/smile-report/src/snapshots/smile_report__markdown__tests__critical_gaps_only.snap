@@ -1,0 +1,63 @@
+---
+source: crates/smile-report/src/markdown.rs
+expression: markdown
+---
+# SMILE Validation Report: broken-tutorial.md
+
+## Summary
+
+| Metric | Value |
+|--------|-------|
+| Status | Unresolvable blocker encountered |
+| Iterations | 1 |
+| Duration | 45s |
+| Tutorial | /tutorials/broken-tutorial.md |
+| Gaps Found | 2 (&#128308; 2 critical, &#128992; 0 major, &#128993; 0 minor) |
+
+## Documentation Gaps
+
+### &#128308; Critical Gaps
+
+#### Gap #1: Missing Docker prerequisite
+
+**Location**: Line 5
+**Problem**: Docker is not installed but the tutorial requires Docker commands
+**Suggested Fix**: Add Docker installation instructions as a prerequisite
+
+#### Gap #2: Invalid configuration file
+
+**Location**: `config.yaml`
+**Problem**: The config.yaml file referenced does not exist
+**Suggested Fix**: Provide the complete config.yaml file contents
+
+### &#128992; Major Gaps
+
+*None*
+
+### &#128993; Minor Gaps
+
+*None*
+
+## Timeline
+
+| Time | Iteration | Event | Details |
+|------|-----------|-------|---------|
+| 2026-01-15 10:30:00 UTC | #1 | Blocker encountered | Cannot proceed without Docker |
+
+## Audit Trail
+
+### Commands Executed
+
+*No commands executed.*
+
+### Files Modified
+
+*No files modified.*
+
+### LLM Calls
+
+*No LLM calls made.*
+
+## Recommendations
+
+1. **[prerequisites]** Verify all prerequisites are clearly documented at the start of the tutorial
