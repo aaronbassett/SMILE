@@ -179,6 +179,18 @@ pub enum SmileError {
     /// JSON serialization/deserialization error.
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
+
+    // ========================================================================
+    // State Machine Errors
+    // ========================================================================
+    /// Invalid state transition attempted.
+    #[error("Invalid state transition: cannot go from {from} to {to}")]
+    InvalidStateTransition {
+        /// The current state.
+        from: String,
+        /// The attempted target state.
+        to: String,
+    },
 }
 
 /// Categories of LLM API errors for structured error handling.
@@ -319,6 +331,15 @@ impl SmileError {
         Self::StateFileCorrupted {
             path: path.into(),
             message: message.into(),
+        }
+    }
+
+    /// Creates a new `InvalidStateTransition` error.
+    #[must_use]
+    pub fn invalid_transition(from: impl std::fmt::Display, to: impl std::fmt::Display) -> Self {
+        Self::InvalidStateTransition {
+            from: from.to_string(),
+            to: to.to_string(),
         }
     }
 

@@ -6,6 +6,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::error::{Result, SmileError};
+
 // ============================================================================
 // LoopStatus
 // ============================================================================
@@ -45,6 +47,24 @@ pub enum LoopStatus {
     Timeout,
     /// Unrecoverable error occurred.
     Error,
+}
+
+impl std::fmt::Display for LoopStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Self::Starting => "Starting",
+            Self::RunningStudent => "RunningStudent",
+            Self::WaitingForStudent => "WaitingForStudent",
+            Self::RunningMentor => "RunningMentor",
+            Self::WaitingForMentor => "WaitingForMentor",
+            Self::Completed => "Completed",
+            Self::MaxIterations => "MaxIterations",
+            Self::Blocker => "Blocker",
+            Self::Timeout => "Timeout",
+            Self::Error => "Error",
+        };
+        write!(f, "{s}")
+    }
 }
 
 impl LoopStatus {
@@ -281,6 +301,16 @@ pub struct LoopState {
 
     /// When the state was last updated.
     pub updated_at: DateTime<Utc>,
+
+    /// Error message when status is `Error`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_message: Option<String>,
+
+    /// Current question from student to pass to mentor.
+    ///
+    /// Set when transitioning to `RunningMentor`, cleared when mentor responds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_question: Option<String>,
 }
 
 impl Default for LoopState {
@@ -313,6 +343,8 @@ impl LoopState {
             history: Vec::new(),
             started_at: now,
             updated_at: now,
+            error_message: None,
+            current_question: None,
         }
     }
 
@@ -383,6 +415,322 @@ impl LoopState {
     #[must_use]
     pub fn elapsed(&self) -> chrono::Duration {
         Utc::now() - self.started_at
+    }
+
+    // ========================================================================
+    // State Transition Methods
+    // ========================================================================
+
+    /// Starts the loop, transitioning from `Starting` to `RunningStudent`.
+    ///
+    /// Sets the iteration to 1.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidStateTransition` if the current status is not `Starting`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use smile_orchestrator::{LoopState, LoopStatus};
+    ///
+    /// let mut state = LoopState::new();
+    /// assert!(state.start().is_ok());
+    /// assert_eq!(state.status, LoopStatus::RunningStudent);
+    /// assert_eq!(state.iteration, 1);
+    /// ```
+    pub fn start(&mut self) -> Result<()> {
+        if self.status != LoopStatus::Starting {
+            return Err(SmileError::invalid_transition(
+                self.status,
+                LoopStatus::RunningStudent,
+            ));
+        }
+        self.status = LoopStatus::RunningStudent;
+        self.iteration = 1;
+        self.touch();
+        Ok(())
+    }
+
+    /// Transitions from `RunningStudent` to `WaitingForStudent`.
+    ///
+    /// Called when the student agent has been invoked and we are waiting
+    /// for its callback.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidStateTransition` if the current status is not `RunningStudent`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use smile_orchestrator::{LoopState, LoopStatus};
+    ///
+    /// let mut state = LoopState::new();
+    /// state.start().unwrap();
+    /// assert!(state.start_waiting_for_student().is_ok());
+    /// assert_eq!(state.status, LoopStatus::WaitingForStudent);
+    /// ```
+    pub fn start_waiting_for_student(&mut self) -> Result<()> {
+        if self.status != LoopStatus::RunningStudent {
+            return Err(SmileError::invalid_transition(
+                self.status,
+                LoopStatus::WaitingForStudent,
+            ));
+        }
+        self.status = LoopStatus::WaitingForStudent;
+        self.touch();
+        Ok(())
+    }
+
+    /// Processes the result from the student agent.
+    ///
+    /// Based on the student's status:
+    /// - `Completed`: Transitions to `Completed` terminal state
+    /// - `AskMentor`: Transitions to `RunningMentor` (or `MaxIterations` if limit reached)
+    /// - `CannotComplete`: Transitions to `Blocker` terminal state
+    ///
+    /// Always records the iteration in history.
+    ///
+    /// # Arguments
+    ///
+    /// * `output` - The student's output from this iteration
+    /// * `max_iterations` - The maximum number of iterations allowed
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidStateTransition` if the current status is not `WaitingForStudent`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use smile_orchestrator::{LoopState, LoopStatus, StudentOutput, StudentStatus};
+    ///
+    /// let mut state = LoopState::new();
+    /// state.start().unwrap();
+    /// state.start_waiting_for_student().unwrap();
+    ///
+    /// let output = StudentOutput {
+    ///     status: StudentStatus::Completed,
+    ///     current_step: "Final step".to_string(),
+    ///     summary: "All done!".to_string(),
+    ///     ..Default::default()
+    /// };
+    ///
+    /// assert!(state.receive_student_result(output, 10).is_ok());
+    /// assert_eq!(state.status, LoopStatus::Completed);
+    /// assert_eq!(state.history.len(), 1);
+    /// ```
+    pub fn receive_student_result(
+        &mut self,
+        output: StudentOutput,
+        max_iterations: u32,
+    ) -> Result<()> {
+        if self.status != LoopStatus::WaitingForStudent {
+            return Err(SmileError::invalid_transition(
+                self.status,
+                LoopStatus::Completed, // Placeholder - actual target depends on output
+            ));
+        }
+
+        // Record the iteration
+        let record = IterationRecord::new(self.iteration, output.clone());
+        self.add_iteration(record);
+
+        // Transition based on student status
+        match output.status {
+            StudentStatus::Completed => {
+                self.status = LoopStatus::Completed;
+            }
+            StudentStatus::AskMentor => {
+                // Check if we've hit max iterations before allowing mentor consultation
+                if self.iteration >= max_iterations {
+                    self.status = LoopStatus::MaxIterations;
+                } else {
+                    self.status = LoopStatus::RunningMentor;
+                    // Store the question for the mentor
+                    self.current_question = output.question_for_mentor;
+                }
+            }
+            StudentStatus::CannotComplete => {
+                self.status = LoopStatus::Blocker;
+            }
+        }
+
+        self.touch();
+        Ok(())
+    }
+
+    /// Transitions from `RunningMentor` to `WaitingForMentor`.
+    ///
+    /// Called when the mentor agent has been invoked and we are waiting
+    /// for its callback.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidStateTransition` if the current status is not `RunningMentor`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use smile_orchestrator::{LoopState, LoopStatus, StudentOutput, StudentStatus};
+    ///
+    /// let mut state = LoopState::new();
+    /// state.start().unwrap();
+    /// state.start_waiting_for_student().unwrap();
+    ///
+    /// let output = StudentOutput {
+    ///     status: StudentStatus::AskMentor,
+    ///     current_step: "Step 2".to_string(),
+    ///     question_for_mentor: Some("How do I do this?".to_string()),
+    ///     summary: "Need help".to_string(),
+    ///     ..Default::default()
+    /// };
+    /// state.receive_student_result(output, 10).unwrap();
+    ///
+    /// assert!(state.start_waiting_for_mentor().is_ok());
+    /// assert_eq!(state.status, LoopStatus::WaitingForMentor);
+    /// ```
+    pub fn start_waiting_for_mentor(&mut self) -> Result<()> {
+        if self.status != LoopStatus::RunningMentor {
+            return Err(SmileError::invalid_transition(
+                self.status,
+                LoopStatus::WaitingForMentor,
+            ));
+        }
+        self.status = LoopStatus::WaitingForMentor;
+        self.touch();
+        Ok(())
+    }
+
+    /// Processes the result from the mentor agent.
+    ///
+    /// Records the mentor note and transitions back to `RunningStudent`
+    /// to continue the loop. Increments the iteration count.
+    ///
+    /// # Arguments
+    ///
+    /// * `notes` - The mentor's response/advice
+    /// * `question` - The question that was asked (for record keeping)
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidStateTransition` if the current status is not `WaitingForMentor`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use smile_orchestrator::{LoopState, LoopStatus, StudentOutput, StudentStatus};
+    ///
+    /// let mut state = LoopState::new();
+    /// state.start().unwrap();
+    /// state.start_waiting_for_student().unwrap();
+    ///
+    /// let output = StudentOutput {
+    ///     status: StudentStatus::AskMentor,
+    ///     current_step: "Step 2".to_string(),
+    ///     question_for_mentor: Some("How do I do this?".to_string()),
+    ///     summary: "Need help".to_string(),
+    ///     ..Default::default()
+    /// };
+    /// state.receive_student_result(output, 10).unwrap();
+    /// state.start_waiting_for_mentor().unwrap();
+    ///
+    /// assert!(state.receive_mentor_result("Try this approach".to_string(), "How do I do this?".to_string()).is_ok());
+    /// assert_eq!(state.status, LoopStatus::RunningStudent);
+    /// assert_eq!(state.iteration, 2);
+    /// assert_eq!(state.mentor_notes.len(), 1);
+    /// ```
+    pub fn receive_mentor_result(&mut self, notes: String, question: String) -> Result<()> {
+        if self.status != LoopStatus::WaitingForMentor {
+            return Err(SmileError::invalid_transition(
+                self.status,
+                LoopStatus::RunningStudent,
+            ));
+        }
+
+        // Record the mentor consultation
+        let note = MentorNote::new(self.iteration, question, notes);
+        self.add_mentor_note(note);
+
+        // Clear the current question
+        self.current_question = None;
+
+        // Increment iteration and continue the loop
+        self.iteration += 1;
+        self.status = LoopStatus::RunningStudent;
+        self.touch();
+        Ok(())
+    }
+
+    /// Forces the loop into the `Timeout` terminal state.
+    ///
+    /// Can be called from any non-terminal state when the global timeout
+    /// has been exceeded.
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidStateTransition` if the current status is already terminal.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use smile_orchestrator::{LoopState, LoopStatus};
+    ///
+    /// let mut state = LoopState::new();
+    /// state.start().unwrap();
+    ///
+    /// assert!(state.timeout().is_ok());
+    /// assert_eq!(state.status, LoopStatus::Timeout);
+    /// ```
+    pub fn timeout(&mut self) -> Result<()> {
+        if self.status.is_terminal() {
+            return Err(SmileError::invalid_transition(
+                self.status,
+                LoopStatus::Timeout,
+            ));
+        }
+        self.status = LoopStatus::Timeout;
+        self.touch();
+        Ok(())
+    }
+
+    /// Forces the loop into the `Error` terminal state.
+    ///
+    /// Can be called from any non-terminal state when an unrecoverable
+    /// error has occurred. Stores the error message for debugging.
+    ///
+    /// # Arguments
+    ///
+    /// * `message` - Description of the error that occurred
+    ///
+    /// # Errors
+    ///
+    /// Returns `InvalidStateTransition` if the current status is already terminal.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use smile_orchestrator::{LoopState, LoopStatus};
+    ///
+    /// let mut state = LoopState::new();
+    /// state.start().unwrap();
+    ///
+    /// assert!(state.error("Docker crashed".to_string()).is_ok());
+    /// assert_eq!(state.status, LoopStatus::Error);
+    /// assert_eq!(state.error_message, Some("Docker crashed".to_string()));
+    /// ```
+    pub fn error(&mut self, message: String) -> Result<()> {
+        if self.status.is_terminal() {
+            return Err(SmileError::invalid_transition(
+                self.status,
+                LoopStatus::Error,
+            ));
+        }
+        self.status = LoopStatus::Error;
+        self.error_message = Some(message);
+        self.touch();
+        Ok(())
     }
 }
 
@@ -879,5 +1227,499 @@ mod tests {
             restored.history[0].student_output.files_created,
             vec!["package.json"]
         );
+    }
+
+    // ------------------------------------------------------------------------
+    // LoopStatus Display tests
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_loop_status_display() {
+        assert_eq!(LoopStatus::Starting.to_string(), "Starting");
+        assert_eq!(LoopStatus::RunningStudent.to_string(), "RunningStudent");
+        assert_eq!(
+            LoopStatus::WaitingForStudent.to_string(),
+            "WaitingForStudent"
+        );
+        assert_eq!(LoopStatus::RunningMentor.to_string(), "RunningMentor");
+        assert_eq!(LoopStatus::WaitingForMentor.to_string(), "WaitingForMentor");
+        assert_eq!(LoopStatus::Completed.to_string(), "Completed");
+        assert_eq!(LoopStatus::MaxIterations.to_string(), "MaxIterations");
+        assert_eq!(LoopStatus::Blocker.to_string(), "Blocker");
+        assert_eq!(LoopStatus::Timeout.to_string(), "Timeout");
+        assert_eq!(LoopStatus::Error.to_string(), "Error");
+    }
+
+    // ------------------------------------------------------------------------
+    // State Transition tests
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_start_transition_success() {
+        let mut state = LoopState::new();
+        assert_eq!(state.status, LoopStatus::Starting);
+        assert_eq!(state.iteration, 0);
+
+        let result = state.start();
+        assert!(result.is_ok());
+        assert_eq!(state.status, LoopStatus::RunningStudent);
+        assert_eq!(state.iteration, 1);
+    }
+
+    #[test]
+    fn test_start_transition_invalid_from_running() {
+        let mut state = LoopState::new();
+        state.status = LoopStatus::RunningStudent;
+
+        let result = state.start();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("Invalid state transition"));
+        assert!(err.to_string().contains("RunningStudent"));
+    }
+
+    #[test]
+    fn test_start_waiting_for_student_success() {
+        let mut state = LoopState::new();
+        state.start().unwrap();
+
+        let result = state.start_waiting_for_student();
+        assert!(result.is_ok());
+        assert_eq!(state.status, LoopStatus::WaitingForStudent);
+    }
+
+    #[test]
+    fn test_start_waiting_for_student_invalid_from_starting() {
+        let mut state = LoopState::new();
+
+        let result = state.start_waiting_for_student();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("Invalid state transition"));
+        assert!(err.to_string().contains("Starting"));
+    }
+
+    #[test]
+    fn test_receive_student_result_completed() {
+        let mut state = LoopState::new();
+        state.start().unwrap();
+        state.start_waiting_for_student().unwrap();
+
+        let output = StudentOutput {
+            status: StudentStatus::Completed,
+            current_step: "Final step".to_string(),
+            summary: "Tutorial completed!".to_string(),
+            ..Default::default()
+        };
+
+        let result = state.receive_student_result(output, 10);
+        assert!(result.is_ok());
+        assert_eq!(state.status, LoopStatus::Completed);
+        assert_eq!(state.history.len(), 1);
+        assert_eq!(
+            state.history[0].student_output.status,
+            StudentStatus::Completed
+        );
+    }
+
+    #[test]
+    fn test_receive_student_result_ask_mentor() {
+        let mut state = LoopState::new();
+        state.start().unwrap();
+        state.start_waiting_for_student().unwrap();
+
+        let output = StudentOutput {
+            status: StudentStatus::AskMentor,
+            current_step: "Step 2".to_string(),
+            question_for_mentor: Some("How do I do this?".to_string()),
+            summary: "Need help".to_string(),
+            ..Default::default()
+        };
+
+        let result = state.receive_student_result(output, 10);
+        assert!(result.is_ok());
+        assert_eq!(state.status, LoopStatus::RunningMentor);
+        assert_eq!(
+            state.current_question,
+            Some("How do I do this?".to_string())
+        );
+        assert_eq!(state.history.len(), 1);
+    }
+
+    #[test]
+    fn test_receive_student_result_cannot_complete() {
+        let mut state = LoopState::new();
+        state.start().unwrap();
+        state.start_waiting_for_student().unwrap();
+
+        let output = StudentOutput {
+            status: StudentStatus::CannotComplete,
+            current_step: "Step 3".to_string(),
+            reason: Some("Missing credentials".to_string()),
+            summary: "Cannot proceed".to_string(),
+            ..Default::default()
+        };
+
+        let result = state.receive_student_result(output, 10);
+        assert!(result.is_ok());
+        assert_eq!(state.status, LoopStatus::Blocker);
+        assert_eq!(state.history.len(), 1);
+    }
+
+    #[test]
+    fn test_receive_student_result_max_iterations() {
+        let mut state = LoopState::new();
+        state.start().unwrap();
+        state.start_waiting_for_student().unwrap();
+
+        // Simulate reaching max iterations (iteration = 3, max = 3)
+        state.iteration = 3;
+
+        let output = StudentOutput {
+            status: StudentStatus::AskMentor,
+            current_step: "Step 2".to_string(),
+            question_for_mentor: Some("One more question?".to_string()),
+            summary: "Still stuck".to_string(),
+            ..Default::default()
+        };
+
+        let result = state.receive_student_result(output, 3);
+        assert!(result.is_ok());
+        assert_eq!(state.status, LoopStatus::MaxIterations);
+        // Question should not be stored since we didn't go to RunningMentor
+        assert!(state.current_question.is_none());
+    }
+
+    #[test]
+    fn test_receive_student_result_invalid_from_starting() {
+        let mut state = LoopState::new();
+
+        let output = StudentOutput {
+            status: StudentStatus::Completed,
+            current_step: "Step 1".to_string(),
+            summary: "Done".to_string(),
+            ..Default::default()
+        };
+
+        let result = state.receive_student_result(output, 10);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("Invalid state transition"));
+    }
+
+    #[test]
+    fn test_start_waiting_for_mentor_success() {
+        let mut state = LoopState::new();
+        state.start().unwrap();
+        state.start_waiting_for_student().unwrap();
+
+        let output = StudentOutput {
+            status: StudentStatus::AskMentor,
+            current_step: "Step 2".to_string(),
+            question_for_mentor: Some("Help?".to_string()),
+            summary: "Stuck".to_string(),
+            ..Default::default()
+        };
+        state.receive_student_result(output, 10).unwrap();
+
+        let result = state.start_waiting_for_mentor();
+        assert!(result.is_ok());
+        assert_eq!(state.status, LoopStatus::WaitingForMentor);
+    }
+
+    #[test]
+    fn test_start_waiting_for_mentor_invalid_from_waiting_student() {
+        let mut state = LoopState::new();
+        state.start().unwrap();
+        state.start_waiting_for_student().unwrap();
+
+        let result = state.start_waiting_for_mentor();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("Invalid state transition"));
+        assert!(err.to_string().contains("WaitingForStudent"));
+    }
+
+    #[test]
+    fn test_receive_mentor_result_success() {
+        let mut state = LoopState::new();
+        state.start().unwrap();
+        state.start_waiting_for_student().unwrap();
+
+        let output = StudentOutput {
+            status: StudentStatus::AskMentor,
+            current_step: "Step 2".to_string(),
+            question_for_mentor: Some("How do I configure this?".to_string()),
+            summary: "Need config help".to_string(),
+            ..Default::default()
+        };
+        state.receive_student_result(output, 10).unwrap();
+        state.start_waiting_for_mentor().unwrap();
+
+        assert_eq!(state.iteration, 1);
+
+        let result = state.receive_mentor_result(
+            "Use JSON format for the config".to_string(),
+            "How do I configure this?".to_string(),
+        );
+        assert!(result.is_ok());
+        assert_eq!(state.status, LoopStatus::RunningStudent);
+        assert_eq!(state.iteration, 2);
+        assert_eq!(state.mentor_notes.len(), 1);
+        assert_eq!(state.mentor_notes[0].question, "How do I configure this?");
+        assert_eq!(
+            state.mentor_notes[0].answer,
+            "Use JSON format for the config"
+        );
+        assert!(state.current_question.is_none()); // Should be cleared
+    }
+
+    #[test]
+    fn test_receive_mentor_result_invalid_from_running_mentor() {
+        let mut state = LoopState::new();
+        state.start().unwrap();
+        state.start_waiting_for_student().unwrap();
+
+        let output = StudentOutput {
+            status: StudentStatus::AskMentor,
+            current_step: "Step 2".to_string(),
+            question_for_mentor: Some("Help?".to_string()),
+            summary: "Stuck".to_string(),
+            ..Default::default()
+        };
+        state.receive_student_result(output, 10).unwrap();
+        // Don't call start_waiting_for_mentor
+
+        let result = state.receive_mentor_result("Answer".to_string(), "Question".to_string());
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("Invalid state transition"));
+        assert!(err.to_string().contains("RunningMentor"));
+    }
+
+    #[test]
+    fn test_timeout_from_running_student() {
+        let mut state = LoopState::new();
+        state.start().unwrap();
+
+        let result = state.timeout();
+        assert!(result.is_ok());
+        assert_eq!(state.status, LoopStatus::Timeout);
+    }
+
+    #[test]
+    fn test_timeout_from_waiting_for_mentor() {
+        let mut state = LoopState::new();
+        state.start().unwrap();
+        state.start_waiting_for_student().unwrap();
+
+        let output = StudentOutput {
+            status: StudentStatus::AskMentor,
+            current_step: "Step 2".to_string(),
+            question_for_mentor: Some("Help?".to_string()),
+            summary: "Stuck".to_string(),
+            ..Default::default()
+        };
+        state.receive_student_result(output, 10).unwrap();
+        state.start_waiting_for_mentor().unwrap();
+
+        let result = state.timeout();
+        assert!(result.is_ok());
+        assert_eq!(state.status, LoopStatus::Timeout);
+    }
+
+    #[test]
+    fn test_timeout_invalid_from_terminal() {
+        let mut state = LoopState::new();
+        state.start().unwrap();
+        state.start_waiting_for_student().unwrap();
+
+        let output = StudentOutput {
+            status: StudentStatus::Completed,
+            current_step: "Done".to_string(),
+            summary: "All done".to_string(),
+            ..Default::default()
+        };
+        state.receive_student_result(output, 10).unwrap();
+        assert_eq!(state.status, LoopStatus::Completed);
+
+        let result = state.timeout();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("Invalid state transition"));
+        assert!(err.to_string().contains("Completed"));
+    }
+
+    #[test]
+    fn test_error_from_running() {
+        let mut state = LoopState::new();
+        state.start().unwrap();
+
+        let result = state.error("Docker container crashed".to_string());
+        assert!(result.is_ok());
+        assert_eq!(state.status, LoopStatus::Error);
+        assert_eq!(
+            state.error_message,
+            Some("Docker container crashed".to_string())
+        );
+    }
+
+    #[test]
+    fn test_error_from_starting() {
+        let mut state = LoopState::new();
+
+        let result = state.error("Initialization failed".to_string());
+        assert!(result.is_ok());
+        assert_eq!(state.status, LoopStatus::Error);
+        assert_eq!(
+            state.error_message,
+            Some("Initialization failed".to_string())
+        );
+    }
+
+    #[test]
+    fn test_error_invalid_from_terminal() {
+        let mut state = LoopState::new();
+        state.start().unwrap();
+        state.timeout().unwrap();
+        assert_eq!(state.status, LoopStatus::Timeout);
+
+        let result = state.error("Another error".to_string());
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("Invalid state transition"));
+        assert!(err.to_string().contains("Timeout"));
+    }
+
+    #[test]
+    fn test_full_happy_path_transition_sequence() {
+        let mut state = LoopState::new();
+
+        // Start the loop
+        state.start().unwrap();
+        assert_eq!(state.status, LoopStatus::RunningStudent);
+        assert_eq!(state.iteration, 1);
+
+        // Student starts processing
+        state.start_waiting_for_student().unwrap();
+        assert_eq!(state.status, LoopStatus::WaitingForStudent);
+
+        // Student asks for help
+        let output = StudentOutput {
+            status: StudentStatus::AskMentor,
+            current_step: "Step 1".to_string(),
+            question_for_mentor: Some("How do I start?".to_string()),
+            summary: "Need guidance".to_string(),
+            ..Default::default()
+        };
+        state.receive_student_result(output, 10).unwrap();
+        assert_eq!(state.status, LoopStatus::RunningMentor);
+        assert_eq!(state.history.len(), 1);
+
+        // Mentor starts processing
+        state.start_waiting_for_mentor().unwrap();
+        assert_eq!(state.status, LoopStatus::WaitingForMentor);
+
+        // Mentor provides answer
+        state
+            .receive_mentor_result("Run npm init".to_string(), "How do I start?".to_string())
+            .unwrap();
+        assert_eq!(state.status, LoopStatus::RunningStudent);
+        assert_eq!(state.iteration, 2);
+        assert_eq!(state.mentor_notes.len(), 1);
+
+        // Student continues
+        state.start_waiting_for_student().unwrap();
+        assert_eq!(state.status, LoopStatus::WaitingForStudent);
+
+        // Student completes
+        let output = StudentOutput {
+            status: StudentStatus::Completed,
+            current_step: "Final step".to_string(),
+            summary: "Tutorial completed successfully".to_string(),
+            ..Default::default()
+        };
+        state.receive_student_result(output, 10).unwrap();
+        assert_eq!(state.status, LoopStatus::Completed);
+        assert_eq!(state.history.len(), 2);
+    }
+
+    #[test]
+    fn test_multiple_mentor_consultations() {
+        let mut state = LoopState::new();
+        state.start().unwrap();
+
+        // First iteration - ask mentor
+        state.start_waiting_for_student().unwrap();
+        let output1 = StudentOutput {
+            status: StudentStatus::AskMentor,
+            current_step: "Step 1".to_string(),
+            question_for_mentor: Some("Question 1?".to_string()),
+            summary: "First question".to_string(),
+            ..Default::default()
+        };
+        state.receive_student_result(output1, 10).unwrap();
+        state.start_waiting_for_mentor().unwrap();
+        state
+            .receive_mentor_result("Answer 1".to_string(), "Question 1?".to_string())
+            .unwrap();
+        assert_eq!(state.iteration, 2);
+        assert_eq!(state.mentor_notes.len(), 1);
+
+        // Second iteration - ask mentor again
+        state.start_waiting_for_student().unwrap();
+        let output2 = StudentOutput {
+            status: StudentStatus::AskMentor,
+            current_step: "Step 2".to_string(),
+            question_for_mentor: Some("Question 2?".to_string()),
+            summary: "Second question".to_string(),
+            ..Default::default()
+        };
+        state.receive_student_result(output2, 10).unwrap();
+        state.start_waiting_for_mentor().unwrap();
+        state
+            .receive_mentor_result("Answer 2".to_string(), "Question 2?".to_string())
+            .unwrap();
+        assert_eq!(state.iteration, 3);
+        assert_eq!(state.mentor_notes.len(), 2);
+
+        // Third iteration - complete
+        state.start_waiting_for_student().unwrap();
+        let output3 = StudentOutput {
+            status: StudentStatus::Completed,
+            current_step: "Done".to_string(),
+            summary: "Completed".to_string(),
+            ..Default::default()
+        };
+        state.receive_student_result(output3, 10).unwrap();
+        assert_eq!(state.status, LoopStatus::Completed);
+        assert_eq!(state.history.len(), 3);
+        assert_eq!(state.mentor_notes.len(), 2);
+    }
+
+    #[test]
+    fn test_new_fields_serialization() {
+        let mut state = LoopState::new();
+        state.error_message = Some("Test error".to_string());
+        state.current_question = Some("Test question".to_string());
+
+        let json = serde_json::to_string_pretty(&state).unwrap();
+        assert!(json.contains(r#""error_message": "Test error""#));
+        assert!(json.contains(r#""current_question": "Test question""#));
+
+        // Test deserialization
+        let restored: LoopState = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.error_message, Some("Test error".to_string()));
+        assert_eq!(restored.current_question, Some("Test question".to_string()));
+    }
+
+    #[test]
+    fn test_new_fields_skip_serializing_if_none() {
+        let state = LoopState::new();
+
+        let json = serde_json::to_string(&state).unwrap();
+        // Fields should not be present when None
+        assert!(!json.contains("error_message"));
+        assert!(!json.contains("current_question"));
     }
 }
