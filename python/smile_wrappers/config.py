@@ -52,15 +52,25 @@ class StudentBehavior(BaseModel):
         ask_on_timeout: Ask mentor when an operation times out.
         timeout_seconds: Timeout in seconds for individual operations.
         patience_level: Overall patience level affecting retry behavior.
+
+    Note:
+        Field aliases allow config files to use camelCase (maxRetriesBeforeHelp)
+        as documented in the spec. Both formats are accepted.
     """
 
-    max_retries_before_help: int = Field(default=3, ge=1)
-    ask_on_missing_dependency: bool = True
-    ask_on_ambiguous_instruction: bool = True
-    ask_on_command_failure: bool = True
-    ask_on_timeout: bool = True
-    timeout_seconds: int = Field(default=60, ge=1)
-    patience_level: PatienceLevel = PatienceLevel.LOW
+    model_config = {"populate_by_name": True}
+
+    max_retries_before_help: int = Field(default=3, ge=1, validation_alias="maxRetriesBeforeHelp")
+    ask_on_missing_dependency: bool = Field(default=True, validation_alias="askOnMissingDependency")
+    ask_on_ambiguous_instruction: bool = Field(
+        default=True, validation_alias="askOnAmbiguousInstruction"
+    )
+    ask_on_command_failure: bool = Field(default=True, validation_alias="askOnCommandFailure")
+    ask_on_timeout: bool = Field(default=True, validation_alias="askOnTimeout")
+    timeout_seconds: int = Field(default=60, ge=1, validation_alias="timeoutSeconds")
+    patience_level: PatienceLevel = Field(
+        default=PatienceLevel.LOW, validation_alias="patienceLevel"
+    )
 
 
 class Config(BaseModel):
@@ -79,13 +89,21 @@ class Config(BaseModel):
         student_behavior: Configuration for student agent behavior.
         state_file: Path to the state file for crash recovery.
         output_dir: Directory for output files and reports.
+
+    Note:
+        Field aliases allow config files to use camelCase (llmProvider)
+        as documented in the spec. Both formats are accepted.
     """
 
+    model_config = {"populate_by_name": True}
+
     tutorial: str = "tutorial.md"
-    llm_provider: LlmProvider = LlmProvider.CLAUDE
-    max_iterations: int = Field(default=10, ge=1)
+    llm_provider: LlmProvider = Field(default=LlmProvider.CLAUDE, validation_alias="llmProvider")
+    max_iterations: int = Field(default=10, ge=1, validation_alias="maxIterations")
     timeout: int = Field(default=1800, ge=1)
-    container_image: str = "smile-base:latest"
-    student_behavior: StudentBehavior = Field(default_factory=StudentBehavior)
-    state_file: str = ".smile/state.json"
-    output_dir: str = "."
+    container_image: str = Field(default="smile-base:latest", validation_alias="containerImage")
+    student_behavior: StudentBehavior = Field(
+        default_factory=StudentBehavior, validation_alias="studentBehavior"
+    )
+    state_file: str = Field(default=".smile/state.json", validation_alias="stateFile")
+    output_dir: str = Field(default=".", validation_alias="outputDir")

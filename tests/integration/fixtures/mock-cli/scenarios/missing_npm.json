@@ -1,0 +1,43 @@
+{
+  "description": "Scenario where student hits npm not found, then completes after mentor help",
+  "responses": [
+    {
+      "status": "ask_mentor",
+      "currentStep": "Step 2: Initialize the Project",
+      "attemptedActions": ["mkdir my-counter", "cd my-counter", "npm init -y"],
+      "problem": "Command not found: npm. The system does not recognize npm as a command.",
+      "questionForMentor": "I tried to run 'npm init -y' but got 'command not found: npm'. How do I install npm or Node.js?",
+      "summary": "Created directory but cannot initialize npm project",
+      "filesCreated": ["my-counter/"],
+      "commandsRun": ["mkdir my-counter", "cd my-counter", "npm init -y"]
+    },
+    {
+      "status": "ask_mentor",
+      "currentStep": "Step 4: Configure the Executable",
+      "attemptedActions": ["Created counter.js", "Looking at configuration"],
+      "problem": "The instruction 'Update the configuration in your project to make it executable' is unclear. Which file should I update?",
+      "questionForMentor": "Which configuration file should I update? The tutorial mentions 'configuration file' but doesn't specify which one.",
+      "summary": "Created counter.js but stuck on configuration step",
+      "filesCreated": ["my-counter/package.json", "my-counter/counter.js"],
+      "commandsRun": []
+    },
+    {
+      "status": "ask_mentor",
+      "currentStep": "Step 5: Test Your Counter",
+      "attemptedActions": ["./counter.js show"],
+      "problem": "Permission denied when running ./counter.js show",
+      "questionForMentor": "I get 'permission denied' when running ./counter.js. How do I make the script executable?",
+      "summary": "Cannot run the counter script due to permissions",
+      "filesCreated": [],
+      "commandsRun": ["./counter.js show"]
+    },
+    {
+      "status": "completed",
+      "currentStep": "Step 6: Install Globally",
+      "attemptedActions": ["chmod +x counter.js", "./counter.js show", "./counter.js increment", "npm link"],
+      "summary": "Tutorial completed successfully after making script executable",
+      "filesCreated": [],
+      "commandsRun": ["chmod +x counter.js", "./counter.js show", "./counter.js increment", "npm link"]
+    }
+  ]
+}

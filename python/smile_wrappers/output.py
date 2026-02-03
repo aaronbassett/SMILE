@@ -16,7 +16,7 @@ import sys
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Literal
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 if TYPE_CHECKING:
     from re import Pattern
@@ -49,17 +49,23 @@ class StudentOutput(BaseModel):
         summary: Brief summary of what was accomplished or attempted.
         files_created: List of file paths created during this step.
         commands_run: List of shell commands executed during this step.
+
+    Note:
+        Field aliases allow LLMs to use either camelCase (currentStep) or
+        snake_case (current_step) in their output. Both formats are accepted.
     """
 
+    model_config = {"populate_by_name": True}
+
     status: Literal["completed", "ask_mentor", "cannot_complete"]
-    current_step: str
-    attempted_actions: list[str]
+    current_step: str = Field(validation_alias="currentStep")
+    attempted_actions: list[str] = Field(validation_alias="attemptedActions")
     problem: str | None = None
-    question_for_mentor: str | None = None
+    question_for_mentor: str | None = Field(default=None, validation_alias="questionForMentor")
     reason: str | None = None
     summary: str
-    files_created: list[str] = []
-    commands_run: list[str] = []
+    files_created: list[str] = Field(default=[], validation_alias="filesCreated")
+    commands_run: list[str] = Field(default=[], validation_alias="commandsRun")
 
 
 class OutputParseError(Exception):
