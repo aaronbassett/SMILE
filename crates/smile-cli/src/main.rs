@@ -11,7 +11,12 @@ use std::time::Duration;
 use clap::Parser;
 use smile_container::{ContainerManager, CreateContainerOptions, Mount};
 use smile_orchestrator::{
-    create_router, AppState, Config, LoopState, LoopStatus, StateLock, Tutorial,
+    create_router, AppState, Config, IterationRecord, LoopState, LoopStatus, MentorNote, StateLock,
+    StudentStatus, Tutorial,
+};
+use smile_report::{
+    json::JsonGenerator, IterationInput, MarkdownGenerator, MentorNoteInput, ReportGenerator,
+    ReportInput, ReportStatus, StudentStatusInput,
 };
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
@@ -287,6 +292,10 @@ async fn run_smile_loop(args: Args) -> anyhow::Result<()> {
     println!();
     print_summary(&final_state, &config);
 
+    // Generate reports
+    let report_dir = PathBuf::from(&config.output_dir);
+    generate_reports(&final_state, &tutorial, &report_dir)?;
+
     loop_result
 }
 
@@ -542,4 +551,128 @@ fn print_summary(state: &LoopState, config: &Config) {
         elapsed.num_minutes(),
         elapsed.num_seconds() % 60
     );
+}
+
+/// Generates reports from the final loop state.
+///
+/// Creates both Markdown and JSON reports in the output directory.
+fn generate_reports(
+    state: &LoopState,
+    tutorial: &Tutorial,
+    output_dir: &Path,
+) -> anyhow::Result<()> {
+    println!();
+    println!("Generating reports...");
+
+    // Create ReportInput from state
+    let tutorial_name = tutorial.path.file_stem().map_or_else(
+        || "Unknown".to_string(),
+        |s| s.to_string_lossy().to_string(),
+    );
+    let tutorial_path = tutorial.path.display().to_string();
+    let input = create_report_input(state, &tutorial_name, &tutorial_path);
+
+    // Generate report
+    let generator = ReportGenerator::new(input);
+    let report = generator.generate();
+
+    // Ensure output directory exists
+    std::fs::create_dir_all(output_dir)?;
+
+    // Write Markdown report
+    let md_generator = MarkdownGenerator::new(&report);
+    let markdown = md_generator.generate();
+    let md_path = output_dir.join("smile-report.md");
+    std::fs::write(&md_path, markdown)?;
+    println!("  Markdown report: {}", md_path.display());
+
+    // Write JSON report
+    let json_path = output_dir.join("smile-report.json");
+    let json_generator = JsonGenerator::new(&report);
+    json_generator.write_to_file(&json_path, true)?;
+    println!("  JSON report: {}", json_path.display());
+
+    // Print gap summary
+    let counts = report.gap_counts();
+    println!();
+    if counts.total() > 0 {
+        println!(
+            "Gaps found: {} ({} critical, {} major, {} minor)",
+            counts.total(),
+            counts.critical,
+            counts.major,
+            counts.minor
+        );
+    } else {
+        println!("No documentation gaps found!");
+    }
+
+    Ok(())
+}
+
+/// Creates a `ReportInput` from the loop state.
+fn create_report_input(state: &LoopState, tutorial_name: &str, tutorial_path: &str) -> ReportInput {
+    ReportInput {
+        tutorial_name: tutorial_name.to_string(),
+        tutorial_path: tutorial_path.to_string(),
+        status: convert_status(state.status),
+        iterations: state.iteration,
+        started_at: state.started_at,
+        ended_at: state.updated_at,
+        history: state.history.iter().map(convert_iteration).collect(),
+        mentor_notes: state.mentor_notes.iter().map(convert_mentor_note).collect(),
+    }
+}
+
+/// Converts `LoopStatus` to `ReportStatus`.
+const fn convert_status(status: LoopStatus) -> ReportStatus {
+    match status {
+        LoopStatus::Completed => ReportStatus::Completed,
+        LoopStatus::MaxIterations => ReportStatus::MaxIterations,
+        LoopStatus::Blocker => ReportStatus::Blocker,
+        LoopStatus::Timeout => ReportStatus::Timeout,
+        LoopStatus::Error => ReportStatus::Error,
+        // Non-terminal states shouldn't appear in final report
+        LoopStatus::Starting => ReportStatus::Starting,
+        LoopStatus::RunningStudent => ReportStatus::RunningStudent,
+        LoopStatus::WaitingForStudent => ReportStatus::WaitingForStudent,
+        LoopStatus::RunningMentor => ReportStatus::RunningMentor,
+        LoopStatus::WaitingForMentor => ReportStatus::WaitingForMentor,
+    }
+}
+
+/// Converts `StudentStatus` to `StudentStatusInput`.
+const fn convert_student_status(status: StudentStatus) -> StudentStatusInput {
+    match status {
+        StudentStatus::Completed => StudentStatusInput::Completed,
+        StudentStatus::AskMentor => StudentStatusInput::AskMentor,
+        StudentStatus::CannotComplete => StudentStatusInput::CannotComplete,
+    }
+}
+
+/// Converts an `IterationRecord` to `IterationInput`.
+fn convert_iteration(record: &IterationRecord) -> IterationInput {
+    IterationInput {
+        iteration: record.iteration,
+        student_status: convert_student_status(record.student_output.status),
+        current_step: record.student_output.current_step.clone(),
+        problem: record.student_output.problem.clone(),
+        question_for_mentor: record.student_output.question_for_mentor.clone(),
+        reason: record.student_output.reason.clone(),
+        summary: record.student_output.summary.clone(),
+        files_created: record.student_output.files_created.clone(),
+        commands_run: record.student_output.commands_run.clone(),
+        started_at: record.started_at,
+        ended_at: record.ended_at,
+    }
+}
+
+/// Converts a `MentorNote` to `MentorNoteInput`.
+fn convert_mentor_note(note: &MentorNote) -> MentorNoteInput {
+    MentorNoteInput {
+        iteration: note.iteration,
+        question: note.question.clone(),
+        answer: note.answer.clone(),
+        timestamp: note.timestamp,
+    }
 }

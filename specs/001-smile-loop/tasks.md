@@ -334,8 +334,8 @@ Shared infrastructure required by all user stories.
 - [x] T175 [GIT] Commit: add report generation
 - [x] T176 [US10] Implement gap extraction from loop history in crates/smile-report/src/lib.rs (use devs:rust-dev agent)
 - [x] T177 [GIT] Commit: add gap extraction
-- [ ] T178 [US10] Integrate report generation into CLI on loop completion in crates/smile-cli/src/main.rs (use devs:rust-dev agent)
-- [ ] T179 [GIT] Commit: integrate report generation
+- [x] T178 [US10] Integrate report generation into CLI on loop completion in crates/smile-cli/src/main.rs (use devs:rust-dev agent)
+- [x] T179 [GIT] Commit: integrate report generation
 
 ### Phase Completion
 - [ ] T180 [US10] Run /sdd:map incremental for Phase 9 changes
