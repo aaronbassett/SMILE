@@ -12,19 +12,27 @@ use smile_report::{
     ReportInput, ReportStatus, StudentStatusInput,
 };
 
-/// Path to the sample tutorial fixture.
-fn fixture_path() -> PathBuf {
+/// Returns the path to a named fixture in the integration test fixtures directory.
+///
+/// # Arguments
+/// * `fixture_name` - The name of the fixture directory (e.g., "sample-tutorial")
+///
+/// # Example
+/// ```ignore
+/// let tutorial_path = get_fixture_path("sample-tutorial").join("tutorial.md");
+/// ```
+fn get_fixture_path(fixture_name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(|p| p.parent())
-        .map(|p| p.join("tests/integration/fixtures/sample-tutorial"))
+        .map(|p| p.join("tests/integration/fixtures").join(fixture_name))
         .expect("Failed to find fixture path")
 }
 
 /// Tests that the sample tutorial loads successfully.
 #[test]
 fn test_sample_tutorial_loads() {
-    let tutorial_path = fixture_path().join("tutorial.md");
+    let tutorial_path = get_fixture_path("sample-tutorial").join("tutorial.md");
     assert!(
         tutorial_path.exists(),
         "Tutorial fixture not found at: {tutorial_path:?}"
@@ -47,7 +55,7 @@ fn test_sample_tutorial_loads() {
 /// Tests that the sample config loads successfully.
 #[test]
 fn test_sample_config_loads() {
-    let config_path = fixture_path().join("smile.json");
+    let config_path = get_fixture_path("sample-tutorial").join("smile.json");
     assert!(
         config_path.exists(),
         "Config fixture not found at: {config_path:?}"
@@ -256,7 +264,7 @@ fn test_loop_state_transitions() {
 /// Tests that the expected gaps document matches our understanding.
 #[test]
 fn test_expected_gaps_documented() {
-    let expected_gaps_path = fixture_path().join("EXPECTED_GAPS.md");
+    let expected_gaps_path = get_fixture_path("sample-tutorial").join("EXPECTED_GAPS.md");
     assert!(
         expected_gaps_path.exists(),
         "EXPECTED_GAPS.md not found at: {expected_gaps_path:?}"
@@ -625,19 +633,10 @@ fn test_full_loop_with_docker() {
 // Python FastAPI Tutorial Tests
 // ============================================================================
 
-/// Path to the Python FastAPI tutorial fixture.
-fn fastapi_fixture_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(|p| p.parent())
-        .map(|p| p.join("tests/integration/fixtures/python-fastapi-tutorial"))
-        .expect("Failed to find FastAPI fixture path")
-}
-
 /// Tests that the Python FastAPI tutorial loads successfully.
 #[test]
 fn test_fastapi_tutorial_loads() {
-    let tutorial_path = fastapi_fixture_path().join("tutorial.md");
+    let tutorial_path = get_fixture_path("python-fastapi-tutorial").join("tutorial.md");
     assert!(
         tutorial_path.exists(),
         "FastAPI tutorial fixture not found at: {tutorial_path:?}"
@@ -665,7 +664,7 @@ fn test_fastapi_tutorial_loads() {
 /// Tests that the Python FastAPI config loads successfully.
 #[test]
 fn test_fastapi_config_loads() {
-    let config_path = fastapi_fixture_path().join("smile.json");
+    let config_path = get_fixture_path("python-fastapi-tutorial").join("smile.json");
     assert!(
         config_path.exists(),
         "FastAPI config fixture not found at: {config_path:?}"
@@ -681,7 +680,7 @@ fn test_fastapi_config_loads() {
 /// Tests that expected gaps document exists for FastAPI tutorial.
 #[test]
 fn test_fastapi_expected_gaps_documented() {
-    let expected_gaps_path = fastapi_fixture_path().join("EXPECTED_GAPS.md");
+    let expected_gaps_path = get_fixture_path("python-fastapi-tutorial").join("EXPECTED_GAPS.md");
     assert!(
         expected_gaps_path.exists(),
         "FastAPI EXPECTED_GAPS.md not found at: {expected_gaps_path:?}"
@@ -773,19 +772,10 @@ fn test_fastapi_gap_extraction() {
 // Docker Setup Tutorial Tests
 // ============================================================================
 
-/// Path to the Docker setup tutorial fixture.
-fn docker_fixture_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(|p| p.parent())
-        .map(|p| p.join("tests/integration/fixtures/docker-setup-tutorial"))
-        .expect("Failed to find Docker fixture path")
-}
-
 /// Tests that the Docker setup tutorial loads successfully.
 #[test]
 fn test_docker_tutorial_loads() {
-    let tutorial_path = docker_fixture_path().join("tutorial.md");
+    let tutorial_path = get_fixture_path("docker-setup-tutorial").join("tutorial.md");
     assert!(
         tutorial_path.exists(),
         "Docker tutorial fixture not found at: {tutorial_path:?}"
@@ -813,7 +803,7 @@ fn test_docker_tutorial_loads() {
 /// Tests that the Docker setup config loads successfully.
 #[test]
 fn test_docker_config_loads() {
-    let config_path = docker_fixture_path().join("smile.json");
+    let config_path = get_fixture_path("docker-setup-tutorial").join("smile.json");
     assert!(
         config_path.exists(),
         "Docker config fixture not found at: {config_path:?}"
@@ -828,7 +818,7 @@ fn test_docker_config_loads() {
 /// Tests that expected gaps document exists for Docker tutorial.
 #[test]
 fn test_docker_expected_gaps_documented() {
-    let expected_gaps_path = docker_fixture_path().join("EXPECTED_GAPS.md");
+    let expected_gaps_path = get_fixture_path("docker-setup-tutorial").join("EXPECTED_GAPS.md");
     assert!(
         expected_gaps_path.exists(),
         "Docker EXPECTED_GAPS.md not found at: {expected_gaps_path:?}"
@@ -943,11 +933,7 @@ fn test_docker_gap_extraction() {
 /// Tests that mock scenario files are valid JSON.
 #[test]
 fn test_mock_scenarios_valid_json() {
-    let mock_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(|p| p.parent())
-        .map(|p| p.join("tests/integration/fixtures/mock-cli/scenarios"))
-        .expect("Failed to find mock scenarios directory");
+    let mock_dir = get_fixture_path("mock-cli").join("scenarios");
 
     let scenarios = [
         "missing_npm.json",
@@ -972,11 +958,7 @@ fn test_mock_scenarios_valid_json() {
 /// Tests mock scenario response structure.
 #[test]
 fn test_mock_scenario_response_structure() {
-    let mock_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(|p| p.parent())
-        .map(|p| p.join("tests/integration/fixtures/mock-cli/scenarios"))
-        .expect("Failed to find mock scenarios directory");
+    let mock_dir = get_fixture_path("mock-cli").join("scenarios");
 
     // Test student scenarios have required fields
     let student_scenarios = [
