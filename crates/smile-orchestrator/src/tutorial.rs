@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::error::{Result, SmileError};
+
 /// Maximum allowed tutorial file size in bytes (100KB).
 pub const MAX_TUTORIAL_SIZE: u64 = 100 * 1024;
 
@@ -100,7 +102,84 @@ impl std::fmt::Display for ImageFormat {
     }
 }
 
+impl Tutorial {
+    /// Loads a tutorial from the given file path.
+    ///
+    /// Validates that:
+    /// - The file exists
+    /// - The file size is within the 100KB limit
+    /// - The content is valid UTF-8
+    ///
+    /// Note: Image extraction is performed separately via [`Tutorial::extract_images`].
+    ///
+    /// # Errors
+    ///
+    /// Returns `SmileError::TutorialNotFound` if the file doesn't exist.
+    /// Returns `SmileError::TutorialTooLarge` if the file exceeds 100KB.
+    /// Returns `SmileError::TutorialEncodingError` if the file is not valid UTF-8.
+    pub fn load(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref();
+        Self::load_from_file(path)
+    }
+
+    /// Loads a tutorial from a specific file path.
+    ///
+    /// Internal implementation that handles all validation.
+    fn load_from_file(path: &Path) -> Result<Self> {
+        // Check if file exists
+        let metadata = std::fs::metadata(path).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                SmileError::tutorial_not_found(path)
+            } else {
+                SmileError::Io(e)
+            }
+        })?;
+
+        // Check file size
+        let file_size = metadata.len();
+        if file_size > MAX_TUTORIAL_SIZE {
+            return Err(SmileError::tutorial_too_large(
+                path,
+                file_size / 1024, // Convert to KB for error message
+            ));
+        }
+
+        // Read file content as UTF-8
+        let content = std::fs::read_to_string(path).map_err(|e| {
+            // Check if it's an encoding error
+            if e.kind() == std::io::ErrorKind::InvalidData {
+                SmileError::tutorial_encoding(path)
+            } else {
+                SmileError::Io(e)
+            }
+        })?;
+
+        // Canonicalize the path for consistent representation
+        let canonical_path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+
+        // Safe to convert: file_size is validated to be <= 100KB, which fits in usize on all platforms
+        #[allow(clippy::cast_possible_truncation)]
+        let size_bytes = file_size as usize;
+
+        Ok(Self {
+            path: canonical_path,
+            content,
+            images: Vec::new(), // Images extracted separately
+            size_bytes,
+        })
+    }
+
+    /// Returns the directory containing the tutorial file.
+    ///
+    /// This is used as the base path for resolving relative image references.
+    #[must_use]
+    pub fn base_dir(&self) -> Option<&Path> {
+        self.path.parent()
+    }
+}
+
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -185,5 +264,168 @@ mod tests {
     #[test]
     fn test_max_tutorial_size_constant() {
         assert_eq!(MAX_TUTORIAL_SIZE, 102_400);
+    }
+
+    #[test]
+    fn test_load_valid_tutorial() {
+        use std::io::Write;
+
+        let temp_dir = std::env::temp_dir();
+        let tutorial_path = temp_dir.join("test_tutorial_valid.md");
+
+        // Create a valid tutorial file
+        let content = "# My Tutorial\n\nThis is a test tutorial.";
+        let mut file = std::fs::File::create(&tutorial_path).unwrap();
+        file.write_all(content.as_bytes()).unwrap();
+
+        // Load and verify
+        let tutorial = Tutorial::load(&tutorial_path).unwrap();
+        assert!(tutorial.path.ends_with("test_tutorial_valid.md"));
+        assert_eq!(tutorial.content, content);
+        assert_eq!(tutorial.size_bytes, content.len());
+        assert!(tutorial.images.is_empty());
+
+        // Cleanup
+        std::fs::remove_file(&tutorial_path).ok();
+    }
+
+    #[test]
+    fn test_load_nonexistent_tutorial() {
+        let result = Tutorial::load("/nonexistent/path/tutorial.md");
+        assert!(result.is_err());
+
+        let err = result.unwrap_err();
+        assert!(
+            matches!(&err, SmileError::TutorialNotFound { path } if path.to_string_lossy().contains("tutorial.md")),
+            "Expected TutorialNotFound, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_load_tutorial_too_large() {
+        use std::io::Write;
+
+        let temp_dir = std::env::temp_dir();
+        let tutorial_path = temp_dir.join("test_tutorial_large.md");
+
+        // Create a file larger than 100KB
+        let content = "x".repeat(150 * 1024); // 150KB
+        let mut file = std::fs::File::create(&tutorial_path).unwrap();
+        file.write_all(content.as_bytes()).unwrap();
+
+        // Load should fail with TutorialTooLarge
+        let result = Tutorial::load(&tutorial_path);
+        assert!(result.is_err());
+
+        let err = result.unwrap_err();
+        assert!(
+            matches!(&err, SmileError::TutorialTooLarge { path, size_kb }
+                if path.to_string_lossy().contains("test_tutorial_large.md") && *size_kb >= 146),
+            "Expected TutorialTooLarge with size >= 146KB, got: {err:?}"
+        );
+
+        // Cleanup
+        std::fs::remove_file(&tutorial_path).ok();
+    }
+
+    #[test]
+    fn test_load_tutorial_at_size_limit() {
+        use std::io::Write;
+
+        let temp_dir = std::env::temp_dir();
+        let tutorial_path = temp_dir.join("test_tutorial_at_limit.md");
+
+        // Create a file exactly at 100KB (should succeed)
+        let content = "x".repeat(100 * 1024);
+        let mut file = std::fs::File::create(&tutorial_path).unwrap();
+        file.write_all(content.as_bytes()).unwrap();
+
+        // Load should succeed
+        let result = Tutorial::load(&tutorial_path);
+        assert!(
+            result.is_ok(),
+            "Tutorial at exactly 100KB should load successfully"
+        );
+
+        let tutorial = result.unwrap();
+        assert_eq!(tutorial.size_bytes, 100 * 1024);
+
+        // Cleanup
+        std::fs::remove_file(&tutorial_path).ok();
+    }
+
+    #[test]
+    fn test_load_tutorial_just_over_limit() {
+        use std::io::Write;
+
+        let temp_dir = std::env::temp_dir();
+        let tutorial_path = temp_dir.join("test_tutorial_over_limit.md");
+
+        // Create a file just over 100KB (100KB + 1 byte)
+        let content = "x".repeat(100 * 1024 + 1);
+        let mut file = std::fs::File::create(&tutorial_path).unwrap();
+        file.write_all(content.as_bytes()).unwrap();
+
+        // Load should fail
+        let result = Tutorial::load(&tutorial_path);
+        assert!(result.is_err(), "Tutorial over 100KB should fail to load");
+
+        // Cleanup
+        std::fs::remove_file(&tutorial_path).ok();
+    }
+
+    #[test]
+    fn test_load_tutorial_invalid_encoding() {
+        use std::io::Write;
+
+        let temp_dir = std::env::temp_dir();
+        let tutorial_path = temp_dir.join("test_tutorial_invalid_utf8.md");
+
+        // Create a file with invalid UTF-8 bytes
+        let invalid_bytes: Vec<u8> = vec![0x80, 0x81, 0x82, 0xFF, 0xFE];
+        let mut file = std::fs::File::create(&tutorial_path).unwrap();
+        file.write_all(&invalid_bytes).unwrap();
+
+        // Load should fail with encoding error
+        let result = Tutorial::load(&tutorial_path);
+        assert!(result.is_err());
+
+        let err = result.unwrap_err();
+        assert!(
+            matches!(&err, SmileError::TutorialEncodingError { path }
+                if path.to_string_lossy().contains("test_tutorial_invalid_utf8.md")),
+            "Expected TutorialEncodingError, got: {err:?}"
+        );
+
+        // Cleanup
+        std::fs::remove_file(&tutorial_path).ok();
+    }
+
+    #[test]
+    fn test_base_dir() {
+        let tutorial = Tutorial {
+            path: PathBuf::from("/tutorials/getting-started/intro.md"),
+            content: String::new(),
+            images: vec![],
+            size_bytes: 0,
+        };
+
+        let base_dir = tutorial.base_dir();
+        assert!(base_dir.is_some());
+        assert_eq!(base_dir.unwrap(), Path::new("/tutorials/getting-started"));
+    }
+
+    #[test]
+    fn test_base_dir_root_file() {
+        let tutorial = Tutorial {
+            path: PathBuf::from("/tutorial.md"),
+            content: String::new(),
+            images: vec![],
+            size_bytes: 0,
+        };
+
+        let base_dir = tutorial.base_dir();
+        assert!(base_dir.is_some());
+        assert_eq!(base_dir.unwrap(), Path::new("/"));
     }
 }
