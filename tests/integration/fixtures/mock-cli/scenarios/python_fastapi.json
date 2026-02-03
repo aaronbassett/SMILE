@@ -1,0 +1,43 @@
+{
+  "description": "Scenario for Python FastAPI tutorial with version and platform issues",
+  "responses": [
+    {
+      "status": "ask_mentor",
+      "currentStep": "Step 2: Create Virtual Environment",
+      "attemptedActions": ["mkdir fastapi-hello", "cd fastapi-hello", "python -m venv venv"],
+      "problem": "Command 'python' not found, but there are candidates: python3, python3.11",
+      "questionForMentor": "The tutorial says to run 'python -m venv venv' but the command is not found. Should I use python3 instead?",
+      "summary": "Created directory but cannot create virtual environment",
+      "filesCreated": ["fastapi-hello/"],
+      "commandsRun": ["mkdir fastapi-hello", "cd fastapi-hello", "python -m venv venv"]
+    },
+    {
+      "status": "ask_mentor",
+      "currentStep": "Step 2: Create Virtual Environment",
+      "attemptedActions": ["python3 -m venv venv", "source venv/bin/activate"],
+      "problem": "The activation command 'source venv/bin/activate' returned an error. I'm using a Windows-like environment.",
+      "questionForMentor": "The tutorial shows 'source venv/bin/activate' but this fails. How do I activate a virtual environment on my system?",
+      "summary": "Created venv but cannot activate it",
+      "filesCreated": ["fastapi-hello/venv/"],
+      "commandsRun": ["python3 -m venv venv", "source venv/bin/activate"]
+    },
+    {
+      "status": "ask_mentor",
+      "currentStep": "Step 5: Run the Server",
+      "attemptedActions": ["pip install fastapi uvicorn", "uvicorn main:app --reload"],
+      "problem": "Error: [Errno 98] Address already in use - the server failed to start because port 8000 is taken",
+      "questionForMentor": "The uvicorn server fails because port 8000 is in use. How do I either free the port or use a different one?",
+      "summary": "Server dependencies installed but cannot start due to port conflict",
+      "filesCreated": ["fastapi-hello/main.py"],
+      "commandsRun": ["pip install fastapi uvicorn", "uvicorn main:app --reload"]
+    },
+    {
+      "status": "completed",
+      "currentStep": "Step 7: Add Documentation",
+      "attemptedActions": ["uvicorn main:app --reload --port 8001", "curl http://localhost:8001/", "curl http://localhost:8001/items/1?q=test"],
+      "summary": "Tutorial completed successfully after using alternative port",
+      "filesCreated": [],
+      "commandsRun": ["uvicorn main:app --reload --port 8001", "curl http://localhost:8001/", "curl http://localhost:8001/items/1?q=test"]
+    }
+  ]
+}
