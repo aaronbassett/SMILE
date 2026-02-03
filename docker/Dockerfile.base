@@ -1,0 +1,83 @@
+# SMILE Base Image
+# Base image for Student and Mentor agent execution
+#
+# This image provides:
+# - Python 3.12 with smile_wrappers package
+# - Node.js for Claude Code CLI
+# - OpenAI CLI for Codex
+# - Google Generative AI for Gemini
+# - Network access for orchestrator callbacks
+
+FROM ubuntu:24.04
+
+# Avoid prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies including Node.js
+RUN apt-get update && apt-get install -y \
+    python3.12 \
+    python3.12-venv \
+    python3-pip \
+    curl \
+    git \
+    ca-certificates \
+    gnupg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js 20 LTS for Claude Code CLI
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user for agent execution
+RUN useradd -m -s /bin/bash smile
+
+# Set up Python virtual environment
+ENV VIRTUAL_ENV=/opt/venv
+RUN python3.12 -m venv $VIRTUAL_ENV
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
+# Install Python dependencies for LLM CLIs
+RUN pip install --no-cache-dir \
+    openai \
+    google-generativeai \
+    httpx \
+    pydantic
+
+# Install smile_wrappers package
+COPY python/pyproject.toml /tmp/python/pyproject.toml
+COPY python/smile_wrappers /tmp/python/smile_wrappers
+COPY python/README.md /tmp/python/README.md
+RUN pip install --no-cache-dir /tmp/python && rm -rf /tmp/python
+
+# Install Claude Code CLI globally
+# Note: Uses npm installation method; native binary requires manual download
+RUN npm install -g @anthropic-ai/claude-code
+
+# Create directories for credentials (mounted at runtime)
+RUN mkdir -p /home/smile/.config/anthropic \
+    && mkdir -p /home/smile/.config/openai \
+    && mkdir -p /home/smile/.config/google \
+    && chown -R smile:smile /home/smile/.config
+
+# Set environment variables for LLM providers
+# These will be overridden at runtime via docker run -e or orchestrator
+ENV ANTHROPIC_API_KEY=""
+ENV OPENAI_API_KEY=""
+ENV GOOGLE_API_KEY=""
+
+# Working directory for tutorial execution
+WORKDIR /workspace
+
+# Switch to non-root user
+USER smile
+
+# Add npm global bin to path for smile user
+ENV PATH="/usr/lib/node_modules/.bin:$PATH"
+
+# Healthcheck to verify the image is ready
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python -c "import smile_wrappers; print('OK')" || exit 1
+
+# Default command - will be overridden by orchestrator
+CMD ["python", "-c", "print('SMILE base image ready')"]

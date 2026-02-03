@@ -1,0 +1,9 @@
+{
+  "description": "Mentor responses for Python FastAPI tutorial issues",
+  "responses": [
+    "The tutorial uses 'python' but many systems have Python 3 installed as 'python3'. Try running 'python3 -m venv venv' instead. The tutorial should specify that Python 3.7+ is required and mention this common naming difference.",
+    "The activation command 'source venv/bin/activate' is Unix-specific. On Windows CMD use 'venv\\Scripts\\activate.bat', on PowerShell use 'venv\\Scripts\\Activate.ps1'. The tutorial should include platform-specific instructions.",
+    "Port 8000 is already in use by another process. You can either: (1) Find and stop the process using port 8000 with 'lsof -i :8000' then 'kill <PID>', or (2) Use a different port by running 'uvicorn main:app --reload --port 8001'. The tutorial should mention how to handle port conflicts.",
+    "The tutorial has been completed. The API documentation is available at /docs and /redoc endpoints."
+  ]
+}

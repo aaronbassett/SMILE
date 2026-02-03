@@ -1,0 +1,22 @@
+{
+  "tutorial": "tutorial.md",
+  "llmProvider": "claude",
+  "maxIterations": 6,
+  "timeout": 300,
+  "containerImage": "smile-base:latest",
+  "studentBehavior": {
+    "maxRetriesBeforeHelp": 2,
+    "askOnMissingDependency": true,
+    "askOnAmbiguousInstruction": true,
+    "askOnCommandFailure": true,
+    "askOnTimeout": true,
+    "timeoutSeconds": 30,
+    "patienceLevel": "low"
+  },
+  "container": {
+    "keepOnFailure": true,
+    "keepOnSuccess": false
+  },
+  "stateFile": ".smile/state.json",
+  "outputDir": "."
+}

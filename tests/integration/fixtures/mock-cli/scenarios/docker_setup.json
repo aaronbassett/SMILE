@@ -1,0 +1,43 @@
+{
+  "description": "Scenario for Docker setup tutorial with installation and daemon issues",
+  "responses": [
+    {
+      "status": "ask_mentor",
+      "currentStep": "Step 1: Verify Docker Installation",
+      "attemptedActions": ["docker --version"],
+      "problem": "Command 'docker' not found. Docker does not appear to be installed.",
+      "questionForMentor": "The tutorial asks me to run 'docker --version' but the command is not found. How do I install Docker?",
+      "summary": "Cannot proceed - Docker is not installed",
+      "filesCreated": [],
+      "commandsRun": ["docker --version"]
+    },
+    {
+      "status": "ask_mentor",
+      "currentStep": "Step 2: Pull Your First Image",
+      "attemptedActions": ["docker pull hello-world"],
+      "problem": "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?",
+      "questionForMentor": "Docker is installed but I get 'Cannot connect to the Docker daemon'. How do I start Docker?",
+      "summary": "Docker installed but daemon not running",
+      "filesCreated": [],
+      "commandsRun": ["docker --version", "docker pull hello-world"]
+    },
+    {
+      "status": "ask_mentor",
+      "currentStep": "Step 3: Run the Container",
+      "attemptedActions": ["docker run hello-world"],
+      "problem": "Got permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock",
+      "questionForMentor": "I get 'permission denied' when running docker commands. Do I need to use sudo or add myself to a group?",
+      "summary": "Docker daemon running but permission denied",
+      "filesCreated": [],
+      "commandsRun": ["docker run hello-world"]
+    },
+    {
+      "status": "completed",
+      "currentStep": "Step 7: Clean Up",
+      "attemptedActions": ["docker run hello-world", "docker ps", "docker ps -a", "docker run -it ubuntu bash", "docker container prune -f"],
+      "summary": "Tutorial completed after resolving permission issues",
+      "filesCreated": [],
+      "commandsRun": ["sudo usermod -aG docker $USER", "newgrp docker", "docker run hello-world", "docker ps -a", "docker run -it ubuntu bash", "docker container prune -f"]
+    }
+  ]
+}

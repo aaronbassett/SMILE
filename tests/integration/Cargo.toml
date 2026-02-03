@@ -1,0 +1,27 @@
+[package]
+name = "smile-integration-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+smile-orchestrator = { path = "../../crates/smile-orchestrator" }
+smile-container = { path = "../../crates/smile-container" }
+smile-report = { path = "../../crates/smile-report" }
+
+axum = { version = "0.7", features = ["ws"] }
+chrono = { version = "0.4", features = ["serde"] }
+futures = "0.3"
+reqwest = { version = "0.12", features = ["json"] }
+serde_json = "1.0"
+tokio = { version = "1.35", features = ["full"] }
+tokio-tungstenite = "0.24"
+tungstenite = "0.24"
+
+[[test]]
+name = "test_loop"
+path = "test_loop.rs"
+
+[[test]]
+name = "test_websocket"
+path = "test_websocket.rs"

@@ -1,0 +1,9 @@
+{
+  "description": "Mentor responses for Docker setup tutorial issues",
+  "responses": [
+    "Docker is not installed on this system. You need to install it first. For Ubuntu/Debian: 'sudo apt-get update && sudo apt-get install docker.io'. For macOS: download Docker Desktop from docker.com. For Windows: install Docker Desktop or use WSL2 with Docker. The tutorial should include installation instructions as a prerequisite.",
+    "The Docker daemon is not running. On Linux, start it with 'sudo systemctl start docker'. On macOS/Windows with Docker Desktop, open the Docker Desktop application. The tutorial should mention that Docker needs to be running, not just installed.",
+    "On Linux, you need to either use 'sudo' before docker commands, or add your user to the docker group with 'sudo usermod -aG docker $USER' and then log out and back in (or run 'newgrp docker'). The tutorial should explain this Linux-specific requirement.",
+    "The tutorial is complete. You've learned the basics of running Docker containers."
+  ]
+}

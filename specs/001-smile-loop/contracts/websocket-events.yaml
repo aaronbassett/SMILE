@@ -1,0 +1,185 @@
+# WebSocket Event Schemas for SMILE Loop
+# Connect to: ws://localhost:3000/ws
+
+# All events are JSON objects with "event" and "payload" fields
+# Example: {"event": "iteration_start", "payload": {"iteration": 1, "timestamp": "..."}}
+
+events:
+  connected:
+    description: |
+      Sent immediately when a client connects to the WebSocket.
+      Contains the current loop state.
+    payload:
+      type: object
+      required:
+        - state
+      properties:
+        state:
+          $ref: 'orchestrator-api.yaml#/components/schemas/LoopState'
+    example:
+      event: connected
+      payload:
+        state:
+          status: running_student
+          iteration: 2
+          mentorNotes: []
+          history: []
+          startedAt: "2026-02-02T10:00:00Z"
+          updatedAt: "2026-02-02T10:05:00Z"
+
+  iteration_start:
+    description: |
+      Sent when a new iteration begins.
+    payload:
+      type: object
+      required:
+        - iteration
+        - timestamp
+      properties:
+        iteration:
+          type: integer
+          description: The iteration number (1-indexed)
+          example: 3
+        timestamp:
+          type: string
+          format: date-time
+          example: "2026-02-02T10:10:00Z"
+    example:
+      event: iteration_start
+      payload:
+        iteration: 3
+        timestamp: "2026-02-02T10:10:00Z"
+
+  student_output:
+    description: |
+      Sent when the Student agent completes (summarized version).
+      Full details available via GET /api/status.
+    payload:
+      type: object
+      required:
+        - status
+        - summary
+        - currentStep
+      properties:
+        status:
+          type: string
+          enum: [completed, ask_mentor, cannot_complete]
+          example: ask_mentor
+        summary:
+          type: string
+          description: Brief summary of what Student accomplished
+          example: "Completed steps 1-2, stuck on dependency installation"
+        currentStep:
+          type: string
+          description: The step Student was working on
+          example: "Step 3: Install dependencies"
+    example:
+      event: student_output
+      payload:
+        status: ask_mentor
+        summary: "Completed steps 1-2, stuck on dependency installation"
+        currentStep: "Step 3: Install dependencies"
+
+  mentor_output:
+    description: |
+      Sent when the Mentor agent provides notes.
+    payload:
+      type: object
+      required:
+        - notes
+      properties:
+        notes:
+          type: string
+          description: The Mentor's guidance notes
+          example: "The tutorial assumes Python 3.11 is installed..."
+    example:
+      event: mentor_output
+      payload:
+        notes: "The tutorial assumes Python 3.11 is installed. The command should be 'pip3' instead of 'pip' on this system."
+
+  loop_complete:
+    description: |
+      Sent when the loop terminates (success or failure).
+    payload:
+      type: object
+      required:
+        - status
+        - summary
+        - iterations
+      properties:
+        status:
+          type: string
+          enum: [completed, max_iterations, blocker, timeout]
+          example: completed
+        summary:
+          type: string
+          description: Summary of the loop outcome
+          example: "Tutorial completed successfully with 2 gaps identified"
+        iterations:
+          type: integer
+          description: Total iterations executed
+          example: 5
+    example:
+      event: loop_complete
+      payload:
+        status: completed
+        summary: "Tutorial completed successfully with 2 gaps identified"
+        iterations: 5
+
+  error:
+    description: |
+      Sent when an error occurs during loop execution.
+    payload:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+          description: Human-readable error message
+          example: "Docker connection lost"
+    example:
+      event: error
+      payload:
+        message: "Docker connection lost: connection refused"
+
+# Connection handling
+connection:
+  endpoint: /ws
+  protocol: WebSocket (RFC 6455)
+
+  behavior:
+    on_connect: |
+      - Server sends 'connected' event with current state
+      - If no loop is running, state.status will be 'starting' or error
+
+    on_disconnect: |
+      - Client can reconnect at any time
+      - No events are buffered for disconnected clients
+      - New 'connected' event sent on reconnection
+
+    slow_clients: |
+      - Events buffered up to 100 messages per client
+      - If client falls behind, oldest events are dropped
+      - Client should handle missing events gracefully
+
+    heartbeat: |
+      - Server sends WebSocket ping every 30 seconds
+      - Client should respond with pong
+      - Connection closed after 3 missed pongs
+
+# Client implementation notes
+client_notes:
+  reconnection: |
+    Clients should implement automatic reconnection with exponential backoff:
+    - Initial delay: 1 second
+    - Max delay: 30 seconds
+    - Backoff factor: 2
+
+  event_handling: |
+    Events may arrive out of order in rare cases. Use timestamps for ordering.
+    The 'iteration' field in events helps correlate related events.
+
+  state_sync: |
+    On reconnection, the 'connected' event provides full current state.
+    Use GET /api/status if you need to sync state without reconnecting.

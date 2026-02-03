@@ -1,0 +1,167 @@
+# Ralph Configuration for SMILE Loop
+# Orchestrates AI coding loop to complete all 12 implementation phases
+#
+# Usage:
+#   ralph                    # Start from current task
+#   ralph --config ralph.toml
+
+[general]
+# Allow up to 5 retries per task before exiting with error
+max_retries = 5
+
+# Stop after 500 iterations (enough for all 243 tasks with commits and retries)
+max_iterations = 500
+
+# 60 minute default timeout per agent (3600 seconds) - LLM calls can be slow
+timeout = 3600
+
+[prompts]
+# Iteration 1: Initial task prompt
+starting = """
+You are implementing SMILE Loop, a tutorial validation tool that simulates a constrained learner.
+
+## Project Context
+- **Rust Workspace**: `crates/` containing smile-cli, smile-orchestrator, smile-container, smile-report
+- **Python Package**: `python/smile_wrappers/` containing student.py, mentor.py, prompts.py, output.py
+- **Docker**: `docker/Dockerfile.base` for containerized agent execution
+- **Specs**: `specs/001-smile-loop/` contains spec.md, plan.md, data-model.md, tasks.md, contracts/
+
+## Tech Stack
+- **Rust 1.75+**: tokio, axum, bollard, serde, clap, tracing
+- **Python 3.11+**: httpx, pydantic
+- **Docker**: Container isolation for Student/Mentor agents
+
+## Agent Selection
+Use the appropriate specialized agent based on task description:
+- `devs:rust-dev` for Rust tasks (crates/*)
+- `devs:python-expert` for Python tasks (python/*)
+- No agent specification for git/docs tasks
+
+## Task Format
+Tasks in tasks.md follow this format:
+- `- [ ]` = pending, `- [x]` = completed
+- `[P]` = parallelizable
+- `[US#]` = user story reference
+- `[GIT]` = git workflow task
+
+## Current State
+- Iteration: {{iteration_count}}
+- Retries: {{retry_count}}
+
+Begin by reading specs/001-smile-loop/tasks.md and finding the first uncompleted task (- [ ]).
+Then execute that task following the instructions in the task description.
+Use the /sdd:implement skill if you need guidance on the implementation workflow.
+"""
+
+# Iteration 2+: Continue with context from previous iteration
+continuation = """
+Continue implementing SMILE Loop.
+
+## Previous Iteration Results
+{{next_prompt}}
+
+## Project Context
+- **Tasks file**: `specs/001-smile-loop/tasks.md` - find next uncompleted task (- [ ])
+- **Design docs**: `specs/001-smile-loop/` (spec.md, plan.md, data-model.md, contracts/)
+- **Guidelines**: `CLAUDE.md` for project conventions
+- **Research**: `specs/001-smile-loop/research.md` for technology decisions
+
+## Agent Selection
+- Rust tasks (crates/*): Use `devs:rust-dev` agent
+- Python tasks (python/*): Use `devs:python-expert` agent
+- Git tasks: Execute git commands directly
+
+## Task Execution Rules
+1. Read tasks.md to find the FIRST uncompleted task (line starting with `- [ ]`)
+2. Execute that specific task following its description
+3. Mark the task complete by changing `- [ ]` to `- [x]` in tasks.md
+4. If it's a [GIT] commit task, create the commit with conventional commit format
+5. If it's a [GIT] push task, push and create/update the PR
+
+Current iteration: {{iteration_count}}, Retries: {{retry_count}}
+"""
+
+# Review: Evaluate dev agent's work
+review = """
+Review the SMILE Loop development work and determine task completion status.
+
+## Development Agent Output
+{{dev_response}}
+
+## Development Agent Errors (if any)
+{{dev_errors}}
+
+## Evaluation Criteria
+
+### For Implementation Tasks:
+1. Was the specific file created/modified as described?
+2. Does the code compile/pass type checks? (cargo check for Rust, mypy for Python)
+3. No obvious errors or incomplete implementations?
+
+### For [GIT] Tasks:
+1. Commit tasks: Was a commit created with conventional commit format?
+2. Push tasks: Was the branch pushed successfully?
+3. PR tasks: Was PR created/updated?
+4. CI tasks: Are checks passing (or at least running)?
+
+### For Phase Completion:
+1. Check if the task was marked complete in tasks.md (- [x])
+2. If this was the last task in a phase, verify phase completion tasks done
+
+## Decision Logic
+- Task completed successfully AND more tasks remain: **CONTINUE**
+- Task failed, code doesn't compile, or test failed: **REPEAT**
+- All tasks in tasks.md are marked [x] (complete): **DONE**
+
+## Response Format
+Respond with EXACTLY ONE of these on a single line:
+- RESULT: CONTINUE
+- RESULT: REPEAT
+- RESULT: DONE
+
+Then provide a brief summary (2-3 sentences) explaining:
+- What task was completed (or what failed)
+- What the next task should be (or what needs fixing)
+"""
+
+# Next Action: Generate instructions for next iteration
+next_action = """
+Based on the completed work, generate clear instructions for the next SMILE Loop task.
+
+## Completed Work
+{{dev_response}}
+
+## Review Assessment
+{{review_response}}
+
+## Instructions Generation
+
+If RESULT was CONTINUE:
+1. Identify what task was just completed
+2. Look at tasks.md to find the NEXT uncompleted task
+3. Provide clear instructions to execute that specific task
+
+If RESULT was REPEAT:
+1. Identify what went wrong
+2. Provide specific instructions to fix the issue
+3. Include any error messages that need to be addressed
+
+Keep instructions concise but actionable. Include:
+- The specific task ID and description
+- The file(s) to create/modify
+- Any special considerations from the task description
+"""
+
+[agents]
+# Development agent: Claude with full permissions for implementation
+dev = "claude --dangerously-skip-permissions -p '{{prompt}}'"
+
+# Review agent: Claude Sonnet for faster, cheaper evaluation
+[agents.review]
+command = "claude --dangerously-skip-permissions --model sonnet -p '{{prompt}}'"
+timeout = 600
+
+# Next-action agent: Claude Sonnet to determine next task
+[agents.next_action]
+command = "claude --dangerously-skip-permissions --model sonnet -p '{{prompt}}'"
+timeout = 300

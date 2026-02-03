@@ -1,0 +1,73 @@
+# lefthook configuration for SMILE Loop
+# Install: brew install lefthook && lefthook install
+
+# Validate commit messages follow conventional commits
+commit-msg:
+  commands:
+    commitlint:
+      run: |
+        msg=$(cat {1})
+        # Pattern: type(scope): subject or type: subject
+        if ! echo "$msg" | grep -qE '^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?: .{1,}$'; then
+          echo "Error: Commit message must follow Conventional Commits format"
+          echo "Format: type(scope): subject"
+          echo "Types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert"
+          echo "Example: feat(orchestrator): add WebSocket broadcast"
+          exit 1
+        fi
+
+# Pre-commit: fast checks on staged files
+pre-commit:
+  parallel: true
+  commands:
+    rust-fmt:
+      glob: "*.rs"
+      run: cargo fmt -- --check
+      skip:
+        - merge
+        - rebase
+
+    rust-clippy:
+      glob: "*.rs"
+      run: cargo clippy --all-targets -- -D warnings
+      skip:
+        - merge
+        - rebase
+
+    python-ruff:
+      root: "python/"
+      glob: "*.py"
+      run: ../.venv/bin/ruff check {staged_files}
+      skip:
+        - merge
+        - rebase
+
+    python-ruff-format:
+      root: "python/"
+      glob: "*.py"
+      run: ../.venv/bin/ruff format --check {staged_files}
+      skip:
+        - merge
+        - rebase
+
+# Pre-push: full validation before pushing
+pre-push:
+  parallel: false
+  commands:
+    rust-test:
+      glob: "*.rs"
+      run: cargo test --all
+
+    rust-clippy-strict:
+      glob: "*.rs"
+      run: cargo clippy --all-targets --all-features -- -D warnings
+
+    python-test:
+      root: "python/"
+      glob: "*.py"
+      run: ../.venv/bin/pytest tests
+
+    python-mypy:
+      root: "python/"
+      glob: "*.py"
+      run: ../.venv/bin/mypy smile_wrappers
