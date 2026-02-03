@@ -4,6 +4,8 @@
 
 SMILE Loop validates technical tutorials by simulating a constrained learner (Student agent) that attempts to follow instructions, escalating to a Mentor agent when stuck. It discovers gaps, unclear instructions, and missing prerequisites before real users do.
 
+> **Status: Alpha (v0.1.0)** - SMILE Loop is an early-stage project actively seeking community feedback. [Report issues](https://github.com/aaronbassett/SMILE/issues/new?template=bug_report.yml), [share feedback](https://github.com/aaronbassett/SMILE/issues/new?template=alpha_feedback.yml), or [request features](https://github.com/aaronbassett/SMILE/issues/new?template=feature_request.yml).
+
 ## The Problem
 
 Tutorial authors discover problems only after users complain, submit support tickets, or abandon tutorials entirely. SMILE Loop solves this by simulating a learner with intentionally constrained capabilities, automatically discovering what's missing before publication.
@@ -214,6 +216,31 @@ The container needs an LLM CLI installed. Check that `docker/Dockerfile.base` in
 ### Tutorial exceeds size limit
 
 Tutorials must be under 100KB. Split large tutorials or reduce embedded content.
+
+## Contributing
+
+SMILE Loop is an alpha project and actively welcomes feedback and contributions!
+
+### Reporting Issues
+
+- **Validation Problems**: Use the [Bug Report](https://github.com/aaronbassett/SMILE/issues/new?template=bug_report.yml) template
+- **Feature Ideas**: Use the [Feature Request](https://github.com/aaronbassett/SMILE/issues/new?template=feature_request.yml) template
+- **General Feedback**: Use the [Alpha Feedback](https://github.com/aaronbassett/SMILE/issues/new?template=alpha_feedback.yml) template
+
+### Contributing Code
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for detailed guidelines on:
+- Setting up your development environment
+- Architecture overview
+- Rust and Python development practices
+- Testing and code quality standards
+- Submitting pull requests
+
+### Community
+
+- Follow our [Code of Conduct](./CODE_OF_CONDUCT.md)
+- Review our [Security Policy](./SECURITY.md)
+- Check [CLAUDE.md](./CLAUDE.md) for project context and development notes
 
 ## License
 

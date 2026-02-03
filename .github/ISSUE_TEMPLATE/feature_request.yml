@@ -1,0 +1,120 @@
+name: Feature Request
+description: Suggest a new feature or enhancement for SMILE Loop
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        We'd love to hear your ideas! Describe the feature you'd like to see in SMILE Loop.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: |
+        What problem would this feature solve?
+        Is it related to tutorial validation, agent behavior, reporting, or infrastructure?
+      placeholder: |
+        Currently, SMILE Loop can only validate complete tutorials in one go.
+        It would be helpful to validate individual sections independently...
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: How would you like this feature to work?
+      placeholder: |
+        Add a --section flag to validate only a specific tutorial section.
+        Usage: cargo run -p smile-cli -- --section "Installation" tutorial.md
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternative Approaches
+      description: Any other ways to solve this problem?
+      placeholder: |
+        - Split the tutorial into multiple files
+        - Use markdown anchors to link to sections
+        - Add section markers (<!-- section: Installation -->)
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Feature Category
+      description: What does this feature affect?
+      options:
+        - Student Agent validation behavior
+        - Mentor Agent guidance system
+        - Loop orchestration and state management
+        - Report generation and formatting
+        - Configuration and customization
+        - Docker/container management
+        - API endpoints or WebSocket events
+        - CLI commands and arguments
+        - Documentation
+        - Testing infrastructure
+        - Developer experience
+        - Performance optimization
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: use_cases
+    attributes:
+      label: Use Cases
+      description: |
+        Describe real-world scenarios where this feature would be valuable.
+      placeholder: |
+        1. Tutorial authors want to validate just the "Setup" section after editing it
+        2. CI/CD pipelines need to validate sections in parallel for faster feedback
+        3. Large tutorials can be broken into smaller, independently-validatable parts
+
+  - type: textarea
+    id: examples
+    attributes:
+      label: Example Scenarios
+      description: |
+        Show how this feature would be used in practice.
+      placeholder: |
+        Before (current):
+        - Validate entire 50-step tutorial (5 minutes)
+
+        After (with feature):
+        - Validate individual 5-step sections (30 seconds each)
+        - Run section validations in parallel
+        - Faster feedback for tutorial authors during editing
+
+  - type: checkboxes
+    id: impact
+    attributes:
+      label: Impact Assessment
+      options:
+        - label: This would improve tutorial author experience
+        - label: This would improve end-user experience
+        - label: This would reduce validation time/cost
+        - label: This would enable new validation scenarios
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      description: Any other relevant information (links, mockups, research)?
+      placeholder: |
+        Related issue: #42
+        Similar feature in [Other Tool]: https://...
+        Blog post on use case: https://...
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I have searched existing issues and discussions
+          required: true
+        - label: I have described a clear problem and proposed solution
+          required: true
