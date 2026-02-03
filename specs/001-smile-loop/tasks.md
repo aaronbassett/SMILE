@@ -115,25 +115,25 @@ Shared infrastructure required by all user stories.
 **Independent Test**: Create configs with different settings, verify behavior changes
 
 ### Phase Start
-- [ ] T039 [GIT] Verify working tree is clean before starting Phase 3
-- [ ] T040 [GIT] Pull and rebase on origin/main if needed
-- [ ] T041 [US2] Create retro/P3.md for this phase
-- [ ] T042 [GIT] Commit: initialize phase 3 retro
+- [x] T039 [GIT] Verify working tree is clean before starting Phase 3
+- [x] T040 [GIT] Pull and rebase on origin/main if needed
+- [x] T041 [US2] Create retro/P3.md for this phase
+- [x] T042 [GIT] Commit: initialize phase 3 retro
 
 ### Implementation
-- [ ] T043 [US2] Implement config loading from smile.json in crates/smile-orchestrator/src/config.rs (use devs:rust-dev agent)
-- [ ] T044 [GIT] Commit: implement config file loading
-- [ ] T045 [US2] Implement config validation with descriptive errors in crates/smile-orchestrator/src/config.rs (use devs:rust-dev agent)
-- [ ] T046 [GIT] Commit: add config validation
-- [ ] T047 [US2] Implement default values for all config fields in crates/smile-orchestrator/src/config.rs (use devs:rust-dev agent)
-- [ ] T048 [GIT] Commit: add config defaults
-- [ ] T049 [US2] Add config loading integration in CLI in crates/smile-cli/src/main.rs (use devs:rust-dev agent)
-- [ ] T050 [GIT] Commit: integrate config loading in CLI
+- [x] T043 [US2] Implement config loading from smile.json in crates/smile-orchestrator/src/config.rs (use devs:rust-dev agent)
+- [x] T044 [GIT] Commit: implement config file loading
+- [x] T045 [US2] Implement config validation with descriptive errors in crates/smile-orchestrator/src/config.rs (use devs:rust-dev agent)
+- [x] T046 [GIT] Commit: add config validation
+- [x] T047 [US2] Implement default values for all config fields in crates/smile-orchestrator/src/config.rs (use devs:rust-dev agent) [done in Phase 2]
+- [x] T048 [GIT] Commit: add config defaults [done in Phase 2]
+- [x] T049 [US2] Add config loading integration in CLI in crates/smile-cli/src/main.rs (use devs:rust-dev agent)
+- [x] T050 [GIT] Commit: integrate config loading in CLI
 
 ### Phase Completion
-- [ ] T051 [US2] Run /sdd:map incremental for Phase 3 changes
-- [ ] T052 [GIT] Commit: update codebase documents for phase 3
-- [ ] T053 [US2] Review retro/P3.md and extract critical learnings to CLAUDE.md (conservative)
+- [x] T051 [US2] Run /sdd:map incremental for Phase 3 changes (skipped - not configured)
+- [x] T052 [GIT] Commit: update codebase documents for phase 3 (skipped - not configured)
+- [x] T053 [US2] Review retro/P3.md and extract critical learnings to CLAUDE.md (conservative)
 - [ ] T054 [GIT] Commit: finalize phase 3 retro
 - [ ] T055 [GIT] Push branch to origin (ensure pre-push hooks pass)
 - [ ] T056 [GIT] Create/update PR to main with phase summary

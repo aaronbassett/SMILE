@@ -96,8 +96,17 @@ Follow these principles when making changes:
 5. **Fail Fast**: Clear error messages with context and suggestions
 6. **README First**: Document before feature is complete
 
+## Clippy Patterns
+
+Strict clippy configuration requires these patterns:
+
+1. **Test struct initialization**: Use `Config { field: value, ..Default::default() }` not `let mut c = Config::default(); c.field = value;`
+2. **Empty strings**: Use `String::new()` not `"".to_string()`
+3. **No panic in tests**: Use `assert!(matches!(...), "message")` instead of `panic!()`
+
 ## Recent Changes
 
+- 2026-02-03: Phase 3 complete - config loading, validation, CLI integration
 - 2026-02-02: Initial planning phase for 001-smile-loop feature
 
 ## Useful Files
