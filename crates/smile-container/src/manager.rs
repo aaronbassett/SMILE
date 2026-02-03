@@ -483,6 +483,153 @@ impl ContainerManager {
         Ok(())
     }
 
+    /// Resets a container by stopping, removing, and recreating it.
+    ///
+    /// This method performs a full container reset cycle:
+    /// 1. Stops the container if it's running (ignores errors if already stopped)
+    /// 2. Removes the container with force to handle edge cases
+    /// 3. Creates a new container with the provided options
+    /// 4. Updates the passed-in container with the new container's ID and status
+    ///
+    /// # Arguments
+    ///
+    /// * `container` - Mutable reference to the container to reset
+    /// * `options` - Configuration for the new container
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ContainerError::RemoveFailed`] if the container removal fails.
+    ///
+    /// Returns [`ContainerError::InvalidMountPath`] if any mount's host path
+    /// does not exist on the filesystem.
+    ///
+    /// Returns [`ContainerError::CreateFailed`] if the new container creation fails.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use smile_container::{ContainerManager, CreateContainerOptions, Container, ContainerStatus};
+    ///
+    /// # async fn example() -> Result<(), smile_container::ContainerError> {
+    /// let manager = ContainerManager::new()?;
+    ///
+    /// // Assuming we have an existing container
+    /// let mut container = Container::new("abc123", "my-container", "alpine:latest")
+    ///     .with_status(ContainerStatus::Running);
+    ///
+    /// let options = CreateContainerOptions::new("my-container", "alpine:latest");
+    /// manager.reset_container(&mut container, options).await?;
+    ///
+    /// // Container now has a new ID and is in Created state
+    /// assert_eq!(container.status, ContainerStatus::Created);
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[instrument(skip(self, container, options), fields(container_id = %container.id, container_name = %container.name))]
+    pub async fn reset_container(
+        &self,
+        container: &mut Container,
+        options: CreateContainerOptions,
+    ) -> Result<(), ContainerError> {
+        debug!("Resetting container");
+
+        // Step 1: Stop the container if it can be stopped (ignore errors if already stopped)
+        if container.can_stop() {
+            debug!("Stopping container before reset");
+            if let Err(e) = self.stop_container(container, Some(10)).await {
+                debug!(error = %e, "Stop failed (may already be stopped), continuing with removal");
+            }
+        }
+
+        // Step 2: Remove the container with force to handle edge cases
+        debug!("Removing container for reset");
+        self.remove_container(container, true).await?;
+
+        // Step 3: Create a new container with the provided options
+        debug!("Creating new container after reset");
+        let new_container = self.create_container(options).await?;
+
+        // Step 4: Update the passed-in container with new container's data
+        container.id = new_container.id;
+        container.name = new_container.name;
+        container.image = new_container.image;
+        container.status = new_container.status;
+        container.mounts = new_container.mounts;
+        container.created_at = new_container.created_at;
+
+        info!(new_container_id = %container.id, "Container reset successfully");
+        Ok(())
+    }
+
+    /// Resets a container for a new SMILE iteration.
+    ///
+    /// This is a convenience method for the common SMILE use case where a container
+    /// needs to be reset between validation iterations. It:
+    /// 1. Calls [`reset_container`](Self::reset_container) to perform the reset
+    /// 2. Adds a `SMILE_ITERATION` environment variable with the iteration number
+    /// 3. Logs the iteration reset for observability
+    ///
+    /// # Arguments
+    ///
+    /// * `container` - Mutable reference to the container to reset
+    /// * `iteration` - The current iteration number (1-based)
+    /// * `options` - Configuration for the new container
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ContainerError::RemoveFailed`] if the container removal fails.
+    ///
+    /// Returns [`ContainerError::InvalidMountPath`] if any mount's host path
+    /// does not exist on the filesystem.
+    ///
+    /// Returns [`ContainerError::CreateFailed`] if the new container creation fails.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use smile_container::{ContainerManager, CreateContainerOptions, Container, ContainerStatus};
+    ///
+    /// # async fn example() -> Result<(), smile_container::ContainerError> {
+    /// let manager = ContainerManager::new()?;
+    ///
+    /// let mut container = Container::new("abc123", "smile-session", "smile-base:latest")
+    ///     .with_status(ContainerStatus::Running);
+    ///
+    /// let options = CreateContainerOptions::new("smile-session", "smile-base:latest");
+    /// manager.reset_container_for_iteration(&mut container, 2, options).await?;
+    ///
+    /// // Container is now reset and ready for iteration 2
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[instrument(skip(self, container, options), fields(container_id = %container.id, iteration = %iteration))]
+    pub async fn reset_container_for_iteration(
+        &self,
+        container: &mut Container,
+        iteration: u32,
+        options: CreateContainerOptions,
+    ) -> Result<(), ContainerError> {
+        info!(
+            iteration = iteration,
+            "Resetting container for new iteration"
+        );
+
+        // Add the SMILE_ITERATION environment variable to the options
+        let options_with_iteration = options.with_env("SMILE_ITERATION", iteration.to_string());
+
+        // Perform the reset
+        self.reset_container(container, options_with_iteration)
+            .await?;
+
+        debug!(
+            iteration = iteration,
+            container_id = %container.id,
+            "Container ready for iteration"
+        );
+
+        Ok(())
+    }
+
     /// Gets the current status of a container from Docker.
     ///
     /// This method inspects the container via the Docker API and maps the
@@ -912,5 +1059,121 @@ mod tests {
             .await
             .expect("Failed to force remove container");
         assert_eq!(container.status, ContainerStatus::Gone);
+    }
+
+    /// Test container reset: create, start, reset, verify new container.
+    ///
+    /// Note: This test requires Docker and will create real containers.
+    #[tokio::test]
+    #[ignore = "requires running Docker daemon"]
+    async fn reset_container_creates_new_container() {
+        let manager = ContainerManager::new().expect("Failed to create manager");
+
+        // Create and start initial container
+        let options = CreateContainerOptions::new("smile-test-reset", "alpine:latest")
+            .with_cmd(vec!["sleep", "300"]);
+
+        let mut container = manager
+            .create_container(options)
+            .await
+            .expect("Failed to create container");
+        let original_id = container.id.clone();
+
+        manager
+            .start_container(&mut container)
+            .await
+            .expect("Failed to start container");
+        assert_eq!(container.status, ContainerStatus::Running);
+
+        // Reset the container
+        let reset_options = CreateContainerOptions::new("smile-test-reset", "alpine:latest")
+            .with_cmd(vec!["sleep", "300"]);
+
+        manager
+            .reset_container(&mut container, reset_options)
+            .await
+            .expect("Failed to reset container");
+
+        // Verify we have a new container
+        assert_ne!(
+            container.id, original_id,
+            "Container ID should change after reset"
+        );
+        assert_eq!(container.status, ContainerStatus::Created);
+
+        // Verify old container no longer exists
+        let result = manager.get_container_status(&original_id).await;
+        assert!(
+            matches!(result, Err(ContainerError::NotFound(_))),
+            "Original container should be gone, got: {result:?}"
+        );
+
+        // Cleanup
+        let _ = manager.remove_container(&mut container, true).await;
+    }
+
+    /// Test that reset works on a stopped container.
+    ///
+    /// Note: This test requires Docker and will create real containers.
+    #[tokio::test]
+    #[ignore = "requires running Docker daemon"]
+    async fn reset_container_works_when_stopped() {
+        let manager = ContainerManager::new().expect("Failed to create manager");
+
+        // Create a container (don't start it)
+        let options = CreateContainerOptions::new("smile-test-reset-stopped", "alpine:latest");
+
+        let mut container = manager
+            .create_container(options)
+            .await
+            .expect("Failed to create container");
+        assert_eq!(container.status, ContainerStatus::Created);
+        let original_id = container.id.clone();
+
+        // Reset without starting
+        let reset_options =
+            CreateContainerOptions::new("smile-test-reset-stopped", "alpine:latest");
+
+        manager
+            .reset_container(&mut container, reset_options)
+            .await
+            .expect("Failed to reset stopped container");
+
+        assert_ne!(container.id, original_id);
+        assert_eq!(container.status, ContainerStatus::Created);
+
+        // Cleanup
+        let _ = manager.remove_container(&mut container, true).await;
+    }
+
+    /// Test `reset_container_for_iteration` adds iteration environment variable.
+    ///
+    /// Note: This test requires Docker and will create real containers.
+    #[tokio::test]
+    #[ignore = "requires running Docker daemon"]
+    async fn reset_container_for_iteration_sets_env_var() {
+        let manager = ContainerManager::new().expect("Failed to create manager");
+
+        // Create initial container
+        let options = CreateContainerOptions::new("smile-test-iteration", "alpine:latest");
+
+        let mut container = manager
+            .create_container(options)
+            .await
+            .expect("Failed to create container");
+
+        // Reset for iteration 5
+        let reset_options = CreateContainerOptions::new("smile-test-iteration", "alpine:latest")
+            .with_env("EXISTING_VAR", "value");
+
+        manager
+            .reset_container_for_iteration(&mut container, 5, reset_options)
+            .await
+            .expect("Failed to reset for iteration");
+
+        assert_eq!(container.status, ContainerStatus::Created);
+
+        // Cleanup
+        let _ = manager.remove_container(&mut container, true).await;
     }
 }
