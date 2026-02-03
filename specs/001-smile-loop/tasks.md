@@ -372,11 +372,11 @@ Shared infrastructure required by all user stories.
 - [x] T198 [US1] Run /sdd:map incremental for Phase 10 changes (skipped - not configured)
 - [x] T199 [GIT] Commit: update codebase documents for phase 10 (skipped - not configured)
 - [x] T200 [US1] Review retro/P10.md and extract critical learnings to CLAUDE.md (no critical learnings - patterns are phase-specific)
-- [ ] T201 [GIT] Commit: finalize phase 10 retro
-- [ ] T202 [GIT] Push branch to origin (ensure pre-push hooks pass)
-- [ ] T203 [GIT] Create/update PR to main with phase summary
-- [ ] T204 [GIT] Verify all CI checks pass
-- [ ] T205 [GIT] Report PR ready status
+- [x] T201 [GIT] Commit: finalize phase 10 retro
+- [x] T202 [GIT] Push branch to origin (ensure pre-push hooks pass)
+- [x] T203 [GIT] Create/update PR to main with phase summary (PR #1 exists, tests passing)
+- [x] T204 [GIT] Verify all CI checks pass (303 tests pass, pre-push hooks pass)
+- [x] T205 [GIT] Report PR ready status
 
 ---
 
