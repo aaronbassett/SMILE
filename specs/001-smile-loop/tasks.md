@@ -284,16 +284,16 @@ Shared infrastructure required by all user stories.
 **Independent Test**: Verify all termination conditions and state transitions
 
 ### Phase Start
-- [ ] T143 [GIT] Verify working tree is clean before starting Phase 8
-- [ ] T144 [GIT] Pull and rebase on origin/main if needed
-- [ ] T145 [US8] Create retro/P8.md for this phase
-- [ ] T146 [GIT] Commit: initialize phase 8 retro
+- [x] T143 [GIT] Verify working tree is clean before starting Phase 8
+- [x] T144 [GIT] Pull and rebase on origin/main if needed
+- [x] T145 [US8] Create retro/P8.md for this phase
+- [x] T146 [GIT] Commit: initialize phase 8 retro
 
 ### Implementation
-- [ ] T147 [US8] Create LoopState and LoopStatus types in crates/smile-orchestrator/src/loop_state.rs (use devs:rust-dev agent)
-- [ ] T148 [GIT] Commit: add loop state types
-- [ ] T149 [US8] Implement loop state machine with transitions in crates/smile-orchestrator/src/loop_state.rs (use devs:rust-dev agent)
-- [ ] T150 [GIT] Commit: implement state machine
+- [x] T147 [US8] Create LoopState and LoopStatus types in crates/smile-orchestrator/src/loop_state.rs (use devs:rust-dev agent)
+- [x] T148 [GIT] Commit: add loop state types
+- [x] T149 [US8] Implement loop state machine with transitions in crates/smile-orchestrator/src/loop_state.rs (use devs:rust-dev agent)
+- [x] T150 [GIT] Commit: implement state machine
 - [ ] T151 [P] [US8] Implement HTTP API endpoints per contracts/orchestrator-api.yaml in crates/smile-orchestrator/src/api.rs (use devs:rust-dev agent)
 - [ ] T152 [GIT] Commit: add HTTP API endpoints
 - [ ] T153 [US8] Implement state persistence to JSON file in crates/smile-orchestrator/src/loop_state.rs (use devs:rust-dev agent)
