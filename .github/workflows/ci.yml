@@ -11,6 +11,32 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  msrv:
+    name: MSRV (Rust 1.75)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust 1.75 (MSRV)
+        uses: dtolnay/rust-toolchain@1.75
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-msrv-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-msrv-
+
+      - name: Build with MSRV
+        run: cargo build --all
+
+      - name: Test with MSRV
+        run: cargo test --all
+
   rust:
     name: Rust (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -116,7 +142,7 @@ jobs:
   integration:
     name: Integration Tests
     runs-on: ubuntu-latest
-    needs: [rust, python, docker]
+    needs: [msrv, rust, python, docker]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     steps:
