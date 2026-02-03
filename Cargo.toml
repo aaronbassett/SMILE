@@ -43,6 +43,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 chrono = { version = "0.4", features = ["serde"] }
 # Pin time for MSRV 1.75 compatibility (time-core 0.1.8+ requires edition2024/Rust 1.85+)
 time = ">=0.3.17, <0.3.42"
+# Pin idna_adapter for MSRV 1.75 compatibility (v1.2.1+ uses icu4x v2.x which requires Rust 1.82+)
+idna_adapter = ">=1.0.0, <1.2.1"
 
 # Error handling
 thiserror = "1.0"
