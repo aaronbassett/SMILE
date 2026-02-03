@@ -44,25 +44,25 @@
 Project initialization and scaffolding.
 
 ### Phase Start
-- [ ] T001 [GIT] Verify on main branch and working tree is clean
-- [ ] T002 [GIT] Pull latest changes from origin/main
-- [ ] T003 [GIT] Create feature branch: 001-smile-loop
+- [x] T001 [GIT] Verify on main branch and working tree is clean
+- [x] T002 [GIT] Pull latest changes from origin/main
+- [x] T003 [GIT] Create feature branch: 001-smile-loop
 
 ### Implementation
-- [ ] T004 Verify Rust workspace compiles with `cargo check` (use devs:rust-dev agent)
-- [ ] T005 [GIT] Commit: verify workspace compiles
-- [ ] T006 Install Python dev dependencies with `pip install -e ".[dev]"` in python/
-- [ ] T007 [GIT] Commit: verify python package setup
-- [ ] T008 Install lefthook and verify hooks with `lefthook install && lefthook run pre-commit`
-- [ ] T009 [GIT] Commit: verify git hooks work
-- [ ] T010 Create docker/Dockerfile.base with Ubuntu base, Python, and placeholder for LLM CLIs
-- [ ] T011 [GIT] Commit: add base Dockerfile
+- [x] T004 Verify Rust workspace compiles with `cargo check` (use devs:rust-dev agent)
+- [x] T005 [GIT] Commit: verify workspace compiles
+- [x] T006 Install Python dev dependencies with `pip install -e ".[dev]"` in python/
+- [x] T007 [GIT] Commit: verify python package setup
+- [x] T008 Install lefthook and verify hooks with `lefthook install && lefthook run pre-commit`
+- [x] T009 [GIT] Commit: verify git hooks work
+- [x] T010 Create docker/Dockerfile.base with Ubuntu base, Python, and placeholder for LLM CLIs
+- [x] T011 [GIT] Commit: add base Dockerfile
 
 ### Phase Completion
-- [ ] T012 [GIT] Push branch to origin (ensure pre-push hooks pass)
-- [ ] T013 [GIT] Create/update PR to main with phase summary
-- [ ] T014 [GIT] Verify all CI checks pass
-- [ ] T015 [GIT] Report PR ready status
+- [x] T012 [GIT] Push branch to origin (ensure pre-push hooks pass)
+- [x] T013 [GIT] Create/update PR to main with phase summary
+- [x] T014 [GIT] Verify all CI checks pass
+- [x] T015 [GIT] Report PR ready status
 
 ---
 
