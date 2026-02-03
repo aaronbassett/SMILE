@@ -45,6 +45,8 @@ chrono = { version = "0.4", features = ["serde"] }
 time = ">=0.3.17, <0.3.42"
 # Pin idna_adapter for MSRV 1.75 compatibility (v1.2.1+ uses icu4x v2.x which requires Rust 1.82+)
 idna_adapter = ">=1.0.0, <1.2.1"
+# Pin serde_with for MSRV 1.75 compatibility (v3.15.0+ requires Rust 1.76+)
+serde_with = ">=3.0.0, <3.15.0"
 
 # Error handling
 thiserror = "1.0"
