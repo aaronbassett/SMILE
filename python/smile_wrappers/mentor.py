@@ -18,18 +18,26 @@ import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
 from pydantic import BaseModel, Field, ValidationError
 
-from smile_wrappers.config import Config
 from smile_wrappers.prompts import build_mentor_prompt
+
+if TYPE_CHECKING:
+    from smile_wrappers.config import Config
 from smile_wrappers.student import (
     LlmCli,
     LlmCliError,
     LlmTimeoutError,
     NextAction,
     OrchestratorCallbackError,
+)
+from smile_wrappers.utils import (
+    load_config_from_file,
+    load_mentor_notes_from_file,
+    load_tutorial_content,
 )
 
 __all__ = [
@@ -448,25 +456,6 @@ class MentorWrapper:
             return self._create_fallback_note(e)
 
 
-def _load_config_from_file(config_path: Path) -> Config:
-    """Load configuration from a JSON file.
-
-    Args:
-        config_path: Path to the configuration JSON file.
-
-    Returns:
-        A validated Config object.
-
-    Raises:
-        FileNotFoundError: If the config file does not exist.
-        json.JSONDecodeError: If the file is not valid JSON.
-        ValidationError: If the JSON does not match the Config schema.
-    """
-    with config_path.open() as f:
-        data = json.load(f)
-    return Config.model_validate(data)
-
-
 def _load_stuck_context_from_file(context_path: Path) -> StuckContext:
     """Load stuck context from a JSON file.
 
@@ -484,63 +473,6 @@ def _load_stuck_context_from_file(context_path: Path) -> StuckContext:
     with context_path.open() as f:
         data = json.load(f)
     return StuckContext.model_validate(data)
-
-
-def _load_previous_notes_from_file(notes_path: Path) -> list[str]:
-    """Load previous mentor notes from a JSON file.
-
-    Args:
-        notes_path: Path to the mentor notes JSON file.
-
-    Returns:
-        A list of previous mentor note strings.
-    """
-    if not notes_path.exists():
-        return []
-
-    with notes_path.open() as f:
-        data = json.load(f)
-
-    if isinstance(data, list):
-        return [str(note) for note in data]
-    return []
-
-
-def _load_tutorial_content(tutorial_dir: Path) -> str:
-    """Load tutorial content from the tutorial directory.
-
-    Looks for common tutorial filenames in the specified directory.
-
-    Args:
-        tutorial_dir: Path to the directory containing the tutorial.
-
-    Returns:
-        The tutorial content as a string.
-
-    Raises:
-        FileNotFoundError: If no tutorial file is found.
-    """
-    # Common tutorial filenames to look for
-    tutorial_names = [
-        "tutorial.md",
-        "README.md",
-        "index.md",
-        "TUTORIAL.md",
-    ]
-
-    for name in tutorial_names:
-        tutorial_path = tutorial_dir / name
-        if tutorial_path.exists():
-            return tutorial_path.read_text()
-
-    # If no common name found, look for any markdown file
-    md_files = list(tutorial_dir.glob("*.md"))
-    if md_files:
-        return md_files[0].read_text()
-
-    raise FileNotFoundError(
-        f"No tutorial file found in {tutorial_dir}. Expected one of: {', '.join(tutorial_names)}"
-    )
 
 
 def _report_result_to_orchestrator(
@@ -608,7 +540,7 @@ def mentor_main() -> None:
 
     # Load configuration
     try:
-        config = _load_config_from_file(config_path)
+        config = load_config_from_file(config_path)
     except FileNotFoundError:
         print(f"Error: Config file not found at {config_path}", file=sys.stderr)
         sys.exit(1)
@@ -634,14 +566,14 @@ def mentor_main() -> None:
 
     # Load tutorial content
     try:
-        tutorial_content = _load_tutorial_content(tutorial_dir)
+        tutorial_content = load_tutorial_content(tutorial_dir)
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
     # Load previous mentor notes
     try:
-        previous_notes = _load_previous_notes_from_file(mentor_notes_path)
+        previous_notes = load_mentor_notes_from_file(mentor_notes_path)
     except json.JSONDecodeError as e:
         print(f"Warning: Invalid JSON in mentor notes file: {e}", file=sys.stderr)
         previous_notes = []

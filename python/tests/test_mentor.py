@@ -19,15 +19,17 @@ from smile_wrappers.mentor import (
     MentorResultResponse,
     MentorWrapper,
     StuckContext,
-    _load_previous_notes_from_file,
     _load_stuck_context_from_file,
-    _load_tutorial_content,
 )
 from smile_wrappers.student import (
     LlmCliError,
     LlmTimeoutError,
     NextAction,
     OrchestratorCallbackError,
+)
+from smile_wrappers.utils import (
+    load_mentor_notes_from_file,
+    load_tutorial_content,
 )
 
 if TYPE_CHECKING:
@@ -527,18 +529,18 @@ class TestFileLoading:
         with pytest.raises(json.JSONDecodeError):
             _load_stuck_context_from_file(context_file)
 
-    def test_load_previous_notes_from_file(self, tmp_path: Path) -> None:
+    def testload_mentor_notes_from_file(self, tmp_path: Path) -> None:
         """Should load previous notes from JSON file."""
         notes_file = tmp_path / "notes.json"
         notes_file.write_text(json.dumps(["Note 1", "Note 2", "Note 3"]))
 
-        notes = _load_previous_notes_from_file(notes_file)
+        notes = load_mentor_notes_from_file(notes_file)
 
         assert notes == ["Note 1", "Note 2", "Note 3"]
 
     def test_load_previous_notes_file_not_found(self, tmp_path: Path) -> None:
         """Should return empty list for missing file."""
-        notes = _load_previous_notes_from_file(tmp_path / "nonexistent.json")
+        notes = load_mentor_notes_from_file(tmp_path / "nonexistent.json")
         assert notes == []
 
     def test_load_previous_notes_non_list(self, tmp_path: Path) -> None:
@@ -546,46 +548,46 @@ class TestFileLoading:
         notes_file = tmp_path / "notes.json"
         notes_file.write_text(json.dumps({"not": "a list"}))
 
-        notes = _load_previous_notes_from_file(notes_file)
+        notes = load_mentor_notes_from_file(notes_file)
         assert notes == []
 
-    def test_load_tutorial_content_tutorial_md(self, tmp_path: Path) -> None:
+    def testload_tutorial_content_tutorial_md(self, tmp_path: Path) -> None:
         """Should load tutorial.md by default."""
         tutorial_file = tmp_path / "tutorial.md"
         tutorial_file.write_text("# Tutorial Content")
 
-        content = _load_tutorial_content(tmp_path)
+        content = load_tutorial_content(tmp_path)
 
         assert content == "# Tutorial Content"
 
-    def test_load_tutorial_content_readme_md(self, tmp_path: Path) -> None:
+    def testload_tutorial_content_readme_md(self, tmp_path: Path) -> None:
         """Should load README.md if tutorial.md not found."""
         readme_file = tmp_path / "README.md"
         readme_file.write_text("# README Content")
 
-        content = _load_tutorial_content(tmp_path)
+        content = load_tutorial_content(tmp_path)
 
         assert content == "# README Content"
 
-    def test_load_tutorial_content_any_md(self, tmp_path: Path) -> None:
+    def testload_tutorial_content_any_md(self, tmp_path: Path) -> None:
         """Should load any .md file if standard names not found."""
         md_file = tmp_path / "guide.md"
         md_file.write_text("# Guide Content")
 
-        content = _load_tutorial_content(tmp_path)
+        content = load_tutorial_content(tmp_path)
 
         assert content == "# Guide Content"
 
-    def test_load_tutorial_content_not_found(self, tmp_path: Path) -> None:
+    def testload_tutorial_content_not_found(self, tmp_path: Path) -> None:
         """Should raise FileNotFoundError if no markdown found."""
         with pytest.raises(FileNotFoundError):
-            _load_tutorial_content(tmp_path)
+            load_tutorial_content(tmp_path)
 
-    def test_load_tutorial_content_priority(self, tmp_path: Path) -> None:
+    def testload_tutorial_content_priority(self, tmp_path: Path) -> None:
         """Should prioritize tutorial.md over README.md."""
         (tmp_path / "tutorial.md").write_text("Tutorial")
         (tmp_path / "README.md").write_text("README")
 
-        content = _load_tutorial_content(tmp_path)
+        content = load_tutorial_content(tmp_path)
 
         assert content == "Tutorial"
