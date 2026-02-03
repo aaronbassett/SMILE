@@ -251,25 +251,25 @@ Shared infrastructure required by all user stories.
 **Independent Test**: Simulate stuck scenarios, verify Mentor provides helpful non-completing notes
 
 ### Phase Start
-- [ ] T123 [GIT] Verify working tree is clean before starting Phase 7
-- [ ] T124 [GIT] Pull and rebase on origin/main if needed
-- [ ] T125 [US7] Create retro/P7.md for this phase
-- [ ] T126 [GIT] Commit: initialize phase 7 retro
+- [x] T123 [GIT] Verify working tree is clean before starting Phase 7
+- [x] T124 [GIT] Pull and rebase on origin/main if needed
+- [x] T125 [US7] Create retro/P7.md for this phase
+- [x] T126 [GIT] Commit: initialize phase 7 retro
 
 ### Implementation
-- [ ] T127 [US7] Implement Mentor prompt construction in python/smile_wrappers/prompts.py (use devs:python-expert agent)
-- [ ] T128 [GIT] Commit: add mentor prompt construction
-- [ ] T129 [US7] Implement Mentor wrapper with LLM CLI invocation in python/smile_wrappers/mentor.py (use devs:python-expert agent)
-- [ ] T130 [GIT] Commit: implement mentor wrapper
-- [ ] T131 [US7] Implement Mentor output handling (text notes) in python/smile_wrappers/mentor.py (use devs:python-expert agent)
-- [ ] T132 [GIT] Commit: add mentor output handling
-- [ ] T133 [US7] Implement HTTP callback to orchestrator in python/smile_wrappers/mentor.py (use devs:python-expert agent)
-- [ ] T134 [GIT] Commit: add mentor orchestrator callback
+- [x] T127 [US7] Implement Mentor prompt construction in python/smile_wrappers/prompts.py (use devs:python-expert agent) [already existed from Phase 6]
+- [x] T128 [GIT] Commit: add mentor prompt construction [already in codebase]
+- [x] T129 [US7] Implement Mentor wrapper with LLM CLI invocation in python/smile_wrappers/mentor.py (use devs:python-expert agent)
+- [x] T130 [GIT] Commit: implement mentor wrapper
+- [x] T131 [US7] Implement Mentor output handling (text notes) in python/smile_wrappers/mentor.py (use devs:python-expert agent)
+- [x] T132 [GIT] Commit: add mentor output handling [combined with T130]
+- [x] T133 [US7] Implement HTTP callback to orchestrator in python/smile_wrappers/mentor.py (use devs:python-expert agent)
+- [x] T134 [GIT] Commit: add mentor orchestrator callback [combined with T130]
 
 ### Phase Completion
-- [ ] T135 [US7] Run /sdd:map incremental for Phase 7 changes
-- [ ] T136 [GIT] Commit: update codebase documents for phase 7
-- [ ] T137 [US7] Review retro/P7.md and extract critical learnings to CLAUDE.md (conservative)
+- [x] T135 [US7] Run /sdd:map incremental for Phase 7 changes (skipped - not configured)
+- [x] T136 [GIT] Commit: update codebase documents for phase 7 (skipped - not configured)
+- [x] T137 [US7] Review retro/P7.md and extract critical learnings to CLAUDE.md (no critical learnings)
 - [ ] T138 [GIT] Commit: finalize phase 7 retro
 - [ ] T139 [GIT] Push branch to origin (ensure pre-push hooks pass)
 - [ ] T140 [GIT] Create/update PR to main with phase summary
