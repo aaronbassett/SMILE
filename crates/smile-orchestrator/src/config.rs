@@ -159,11 +159,16 @@ impl Config {
     ///
     /// Returns `SmileError::ConfigParseError` if the file exists but contains
     /// invalid JSON or invalid enum values.
+    ///
+    /// Returns `SmileError::ConfigValidationError` if the configuration values
+    /// are invalid (e.g., zero iterations, empty paths).
     pub fn load_from_file(path: &Path) -> Result<Self> {
         let contents = match std::fs::read_to_string(path) {
             Ok(contents) => contents,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(Self::default());
+                let config = Self::default();
+                config.validate()?;
+                return Ok(config);
             }
             Err(e) => {
                 return Err(SmileError::config_parse(
@@ -173,7 +178,69 @@ impl Config {
             }
         };
 
-        serde_json::from_str(&contents).map_err(|e| SmileError::config_parse(path, e.to_string()))
+        let config: Self = serde_json::from_str(&contents)
+            .map_err(|e| SmileError::config_parse(path, e.to_string()))?;
+        config.validate()?;
+        Ok(config)
+    }
+
+    /// Validates the configuration values.
+    ///
+    /// Checks that all required fields have valid values:
+    /// - `max_iterations` must be greater than 0
+    /// - `timeout` must be greater than 0
+    /// - `student_behavior.timeout_seconds` must be greater than 0
+    /// - `student_behavior.max_retries_before_help` must be greater than 0
+    /// - `tutorial` path must not be empty
+    /// - `output_dir` must not be empty
+    ///
+    /// # Errors
+    ///
+    /// Returns `SmileError::ConfigValidationError` if any validation check fails.
+    pub fn validate(&self) -> Result<()> {
+        if self.max_iterations == 0 {
+            return Err(SmileError::config_validation(
+                "maxIterations must be greater than 0",
+                "Set maxIterations to at least 1 in your smile.json",
+            ));
+        }
+
+        if self.timeout == 0 {
+            return Err(SmileError::config_validation(
+                "timeout must be greater than 0",
+                "Set timeout to at least 1 second in your smile.json",
+            ));
+        }
+
+        if self.student_behavior.timeout_seconds == 0 {
+            return Err(SmileError::config_validation(
+                "studentBehavior.timeoutSeconds must be greater than 0",
+                "Set studentBehavior.timeoutSeconds to at least 1 second in your smile.json",
+            ));
+        }
+
+        if self.student_behavior.max_retries_before_help == 0 {
+            return Err(SmileError::config_validation(
+                "studentBehavior.maxRetriesBeforeHelp must be greater than 0",
+                "Set studentBehavior.maxRetriesBeforeHelp to at least 1 in your smile.json",
+            ));
+        }
+
+        if self.tutorial.trim().is_empty() {
+            return Err(SmileError::config_validation(
+                "tutorial path must not be empty",
+                "Provide a valid tutorial file path in your smile.json",
+            ));
+        }
+
+        if self.output_dir.trim().is_empty() {
+            return Err(SmileError::config_validation(
+                "outputDir must not be empty",
+                "Provide a valid output directory path in your smile.json (use '.' for current directory)",
+            ));
+        }
+
+        Ok(())
     }
 }
 
@@ -633,5 +700,194 @@ mod tests {
         }"#;
         let config: Config = serde_json::from_str(json).unwrap();
         assert_eq!(config.tutorial, "test.md");
+    }
+
+    #[test]
+    fn test_config_validation_zero_max_iterations() {
+        let config = Config {
+            max_iterations: 0,
+            ..Default::default()
+        };
+
+        let result = config.validate();
+        assert!(result.is_err());
+
+        let err = result.unwrap_err();
+        assert!(
+            matches!(&err, SmileError::ConfigValidationError { message, suggestion }
+                if message.contains("maxIterations") && suggestion.contains("maxIterations")),
+            "Expected ConfigValidationError about maxIterations, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_config_validation_zero_timeout() {
+        let config = Config {
+            timeout: 0,
+            ..Default::default()
+        };
+
+        let result = config.validate();
+        assert!(result.is_err());
+
+        let err = result.unwrap_err();
+        assert!(
+            matches!(&err, SmileError::ConfigValidationError { message, suggestion }
+                if message.contains("timeout") && suggestion.contains("timeout")),
+            "Expected ConfigValidationError about timeout, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_config_validation_zero_student_timeout_seconds() {
+        let config = Config {
+            student_behavior: StudentBehavior {
+                timeout_seconds: 0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let result = config.validate();
+        assert!(result.is_err());
+
+        let err = result.unwrap_err();
+        assert!(
+            matches!(&err, SmileError::ConfigValidationError { message, suggestion }
+                if message.contains("timeoutSeconds") && suggestion.contains("timeoutSeconds")),
+            "Expected ConfigValidationError about timeoutSeconds, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_config_validation_zero_max_retries() {
+        let config = Config {
+            student_behavior: StudentBehavior {
+                max_retries_before_help: 0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let result = config.validate();
+        assert!(result.is_err());
+
+        let err = result.unwrap_err();
+        assert!(
+            matches!(&err, SmileError::ConfigValidationError { message, suggestion }
+                if message.contains("maxRetriesBeforeHelp") && suggestion.contains("maxRetriesBeforeHelp")),
+            "Expected ConfigValidationError about maxRetriesBeforeHelp, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_config_validation_empty_tutorial() {
+        let config = Config {
+            tutorial: String::new(),
+            ..Default::default()
+        };
+
+        let result = config.validate();
+        assert!(result.is_err());
+
+        let err = result.unwrap_err();
+        assert!(
+            matches!(&err, SmileError::ConfigValidationError { message, suggestion }
+                if message.contains("tutorial") && suggestion.contains("tutorial")),
+            "Expected ConfigValidationError about tutorial path, got: {err:?}"
+        );
+
+        // Also test whitespace-only tutorial path
+        let config_whitespace = Config {
+            tutorial: "   ".to_string(),
+            ..Default::default()
+        };
+        let result = config_whitespace.validate();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_config_validation_empty_output_dir() {
+        let config = Config {
+            output_dir: String::new(),
+            ..Default::default()
+        };
+
+        let result = config.validate();
+        assert!(result.is_err());
+
+        let err = result.unwrap_err();
+        assert!(
+            matches!(&err, SmileError::ConfigValidationError { message, suggestion }
+                if message.contains("outputDir") && suggestion.contains("output")),
+            "Expected ConfigValidationError about outputDir, got: {err:?}"
+        );
+
+        // Also test whitespace-only output_dir
+        let config_whitespace = Config {
+            output_dir: "   ".to_string(),
+            ..Default::default()
+        };
+        let result = config_whitespace.validate();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_config_validation_valid_config_passes() {
+        let config = Config::default();
+        let result = config.validate();
+        assert!(result.is_ok(), "Default config should pass validation");
+
+        // Test a fully customized valid config
+        let custom_config = Config {
+            tutorial: "my-tutorial.md".to_string(),
+            llm_provider: LlmProvider::Gemini,
+            max_iterations: 5,
+            timeout: 600,
+            container_image: "custom-image:v1".to_string(),
+            student_behavior: StudentBehavior {
+                max_retries_before_help: 2,
+                ask_on_missing_dependency: false,
+                ask_on_ambiguous_instruction: true,
+                ask_on_command_failure: true,
+                ask_on_timeout: false,
+                timeout_seconds: 30,
+                patience_level: PatienceLevel::High,
+            },
+            container: ContainerConfig::default(),
+            state_file: ".custom/state.json".to_string(),
+            output_dir: "/tmp/output".to_string(),
+        };
+        let result = custom_config.validate();
+        assert!(result.is_ok(), "Custom valid config should pass validation");
+    }
+
+    #[test]
+    fn test_load_from_file_validates_after_parsing() {
+        use std::io::Write;
+
+        let temp_dir = std::env::temp_dir();
+        let config_path = temp_dir.join("test_smile_validation.json");
+
+        // Write a syntactically valid config with invalid values
+        let json = r#"{
+            "tutorial": "test.md",
+            "maxIterations": 0
+        }"#;
+        let mut file = std::fs::File::create(&config_path).unwrap();
+        file.write_all(json.as_bytes()).unwrap();
+
+        // Load should fail with validation error, not parse error
+        let result = Config::load_from_file(&config_path);
+        assert!(result.is_err());
+
+        let err = result.unwrap_err();
+        assert!(
+            matches!(&err, SmileError::ConfigValidationError { .. }),
+            "Expected ConfigValidationError, got: {err:?}"
+        );
+
+        // Cleanup
+        std::fs::remove_file(&config_path).ok();
     }
 }

@@ -29,6 +29,15 @@ pub enum SmileError {
         message: String,
     },
 
+    /// Configuration validation failed.
+    #[error("Invalid configuration: {message}\n\nSuggestion: {suggestion}")]
+    ConfigValidationError {
+        /// Description of the validation failure.
+        message: String,
+        /// Actionable suggestion for the user.
+        suggestion: String,
+    },
+
     // ========================================================================
     // Tutorial Loading Errors (E04, E05, E06)
     // ========================================================================
@@ -223,6 +232,15 @@ impl SmileError {
         }
     }
 
+    /// Creates a new `ConfigValidationError` with the given message and suggestion.
+    #[must_use]
+    pub fn config_validation(message: impl Into<String>, suggestion: impl Into<String>) -> Self {
+        Self::ConfigValidationError {
+            message: message.into(),
+            suggestion: suggestion.into(),
+        }
+    }
+
     /// Creates a new `TutorialNotFound` error.
     #[must_use]
     pub fn tutorial_not_found(path: impl Into<PathBuf>) -> Self {
@@ -322,6 +340,7 @@ impl SmileError {
         matches!(
             self,
             Self::ConfigParseError { .. }
+                | Self::ConfigValidationError { .. }
                 | Self::TutorialNotFound { .. }
                 | Self::TutorialTooLarge { .. }
                 | Self::TutorialEncodingError { .. }
