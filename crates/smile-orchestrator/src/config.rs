@@ -4,7 +4,14 @@
 //! the behavior of the SMILE Loop, including LLM provider selection,
 //! student behavior tuning, and container settings.
 
+use std::path::Path;
+
 use serde::{Deserialize, Serialize};
+
+use crate::error::{Result, SmileError};
+
+/// The default config file name.
+const CONFIG_FILE_NAME: &str = "smile.json";
 
 /// Default tutorial file path.
 fn default_tutorial() -> String {
@@ -111,9 +118,67 @@ impl Default for Config {
     }
 }
 
+impl Config {
+    /// Loads configuration from the current working directory.
+    ///
+    /// Looks for `smile.json` in the current directory. If found, loads and
+    /// validates the configuration. If not found, returns default configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file exists but contains invalid JSON.
+    pub fn load() -> Result<Self> {
+        let current_dir = std::env::current_dir().map_err(|e| {
+            SmileError::config_parse(
+                "<current directory>",
+                format!("cannot determine current directory: {e}"),
+            )
+        })?;
+        Self::load_from_dir(&current_dir)
+    }
+
+    /// Loads configuration from a specific directory.
+    ///
+    /// Looks for `smile.json` in the given directory. If found, loads and
+    /// validates the configuration. If not found, returns default configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file exists but contains invalid JSON.
+    pub fn load_from_dir(dir: &Path) -> Result<Self> {
+        let config_path = dir.join(CONFIG_FILE_NAME);
+        Self::load_from_file(&config_path)
+    }
+
+    /// Loads configuration from a specific file path.
+    ///
+    /// If the file does not exist, returns default configuration.
+    /// If the file exists but contains invalid JSON, returns an error.
+    ///
+    /// # Errors
+    ///
+    /// Returns `SmileError::ConfigParseError` if the file exists but contains
+    /// invalid JSON or invalid enum values.
+    pub fn load_from_file(path: &Path) -> Result<Self> {
+        let contents = match std::fs::read_to_string(path) {
+            Ok(contents) => contents,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(Self::default());
+            }
+            Err(e) => {
+                return Err(SmileError::config_parse(
+                    path,
+                    format!("failed to read file: {e}"),
+                ));
+            }
+        };
+
+        serde_json::from_str(&contents).map_err(|e| SmileError::config_parse(path, e.to_string()))
+    }
+}
+
 /// Supported LLM providers for agent interactions.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum LlmProvider {
     /// Anthropic Claude (default).
     #[default]
@@ -122,6 +187,46 @@ pub enum LlmProvider {
     Codex,
     /// Google Gemini.
     Gemini,
+}
+
+impl LlmProvider {
+    /// Parses a string into an `LlmProvider`, case-insensitively.
+    fn from_str_case_insensitive(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "claude" => Some(Self::Claude),
+            "codex" => Some(Self::Codex),
+            "gemini" => Some(Self::Gemini),
+            _ => None,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for LlmProvider {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Self::from_str_case_insensitive(&s).ok_or_else(|| {
+            serde::de::Error::custom(format!(
+                "invalid LLM provider '{s}': expected one of 'claude', 'codex', 'gemini'"
+            ))
+        })
+    }
+}
+
+impl Serialize for LlmProvider {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let s = match self {
+            Self::Claude => "claude",
+            Self::Codex => "codex",
+            Self::Gemini => "gemini",
+        };
+        serializer.serialize_str(s)
+    }
 }
 
 /// Configuration for student agent behavior.
@@ -178,8 +283,7 @@ impl Default for StudentBehavior {
 /// Patience level for the student agent.
 ///
 /// Determines how quickly the student escalates issues to the mentor.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum PatienceLevel {
     /// Low patience - escalates quickly (default).
     #[default]
@@ -188,6 +292,46 @@ pub enum PatienceLevel {
     Medium,
     /// High patience - tries harder before escalating.
     High,
+}
+
+impl PatienceLevel {
+    /// Parses a string into a `PatienceLevel`, case-insensitively.
+    fn from_str_case_insensitive(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "low" => Some(Self::Low),
+            "medium" => Some(Self::Medium),
+            "high" => Some(Self::High),
+            _ => None,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for PatienceLevel {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Self::from_str_case_insensitive(&s).ok_or_else(|| {
+            serde::de::Error::custom(format!(
+                "invalid patience level '{s}': expected one of 'low', 'medium', 'high'"
+            ))
+        })
+    }
+}
+
+impl Serialize for PatienceLevel {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let s = match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+        };
+        serializer.serialize_str(s)
+    }
 }
 
 /// Container lifecycle configuration.
@@ -217,6 +361,8 @@ impl Default for ContainerConfig {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
 
     #[test]
@@ -314,5 +460,178 @@ mod tests {
         assert_eq!(config.student_behavior.max_retries_before_help, 5);
         // Check that other fields got their defaults
         assert!(config.student_behavior.ask_on_missing_dependency);
+    }
+
+    #[test]
+    fn test_llm_provider_case_insensitive() {
+        // Test lowercase
+        let config: Config = serde_json::from_str(r#"{"llmProvider": "claude"}"#).unwrap();
+        assert_eq!(config.llm_provider, LlmProvider::Claude);
+
+        // Test uppercase
+        let config: Config = serde_json::from_str(r#"{"llmProvider": "CLAUDE"}"#).unwrap();
+        assert_eq!(config.llm_provider, LlmProvider::Claude);
+
+        // Test mixed case
+        let config: Config = serde_json::from_str(r#"{"llmProvider": "Claude"}"#).unwrap();
+        assert_eq!(config.llm_provider, LlmProvider::Claude);
+
+        let config: Config = serde_json::from_str(r#"{"llmProvider": "GeMiNi"}"#).unwrap();
+        assert_eq!(config.llm_provider, LlmProvider::Gemini);
+
+        let config: Config = serde_json::from_str(r#"{"llmProvider": "CODEX"}"#).unwrap();
+        assert_eq!(config.llm_provider, LlmProvider::Codex);
+    }
+
+    #[test]
+    fn test_patience_level_case_insensitive() {
+        // Test lowercase
+        let json = r#"{"studentBehavior": {"patienceLevel": "low"}}"#;
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(config.student_behavior.patience_level, PatienceLevel::Low);
+
+        // Test uppercase
+        let json = r#"{"studentBehavior": {"patienceLevel": "HIGH"}}"#;
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(config.student_behavior.patience_level, PatienceLevel::High);
+
+        // Test mixed case
+        let json = r#"{"studentBehavior": {"patienceLevel": "Medium"}}"#;
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            config.student_behavior.patience_level,
+            PatienceLevel::Medium
+        );
+    }
+
+    #[test]
+    fn test_invalid_llm_provider_error() {
+        let json = r#"{"llmProvider": "gpt4"}"#;
+        let result: std::result::Result<Config, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("invalid LLM provider"));
+        assert!(err.contains("gpt4"));
+    }
+
+    #[test]
+    fn test_invalid_patience_level_error() {
+        let json = r#"{"studentBehavior": {"patienceLevel": "extreme"}}"#;
+        let result: std::result::Result<Config, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("invalid patience level"));
+        assert!(err.contains("extreme"));
+    }
+
+    #[test]
+    fn test_load_from_file_valid_json() {
+        use std::io::Write;
+
+        let temp_dir = std::env::temp_dir();
+        let config_path = temp_dir.join("test_smile_valid.json");
+
+        // Write a valid config file
+        let json = r#"{
+            "tutorial": "test.md",
+            "llmProvider": "Gemini",
+            "maxIterations": 5
+        }"#;
+        let mut file = std::fs::File::create(&config_path).unwrap();
+        file.write_all(json.as_bytes()).unwrap();
+
+        // Load and verify
+        let config = Config::load_from_file(&config_path).unwrap();
+        assert_eq!(config.tutorial, "test.md");
+        assert_eq!(config.llm_provider, LlmProvider::Gemini);
+        assert_eq!(config.max_iterations, 5);
+        // Default values should be applied for missing fields
+        assert_eq!(config.timeout, 1800);
+
+        // Cleanup
+        std::fs::remove_file(&config_path).ok();
+    }
+
+    #[test]
+    fn test_load_from_file_invalid_json() {
+        use std::io::Write;
+
+        let temp_dir = std::env::temp_dir();
+        let config_path = temp_dir.join("test_smile_invalid.json");
+
+        // Write invalid JSON
+        let mut file = std::fs::File::create(&config_path).unwrap();
+        file.write_all(b"{ not valid json }").unwrap();
+
+        // Load should fail with ConfigParseError
+        let result = Config::load_from_file(&config_path);
+        assert!(result.is_err());
+
+        let err = result.unwrap_err();
+        assert!(
+            matches!(&err, SmileError::ConfigParseError { path, message } if *path == config_path && !message.is_empty()),
+            "Expected ConfigParseError with correct path, got: {err:?}"
+        );
+
+        // Cleanup
+        std::fs::remove_file(&config_path).ok();
+    }
+
+    #[test]
+    fn test_load_from_file_nonexistent_returns_default() {
+        let nonexistent_path = PathBuf::from("/nonexistent/path/smile.json");
+        let config = Config::load_from_file(&nonexistent_path).unwrap();
+
+        // Should return default config
+        assert_eq!(config.tutorial, "tutorial.md");
+        assert_eq!(config.llm_provider, LlmProvider::Claude);
+        assert_eq!(config.max_iterations, 10);
+    }
+
+    #[test]
+    fn test_load_from_dir_finds_smile_json() {
+        use std::io::Write;
+
+        let temp_dir = std::env::temp_dir().join("test_smile_dir");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let config_path = temp_dir.join("smile.json");
+        let json = r#"{"tutorial": "dir_test.md"}"#;
+        let mut file = std::fs::File::create(&config_path).unwrap();
+        file.write_all(json.as_bytes()).unwrap();
+
+        // Load from directory
+        let config = Config::load_from_dir(&temp_dir).unwrap();
+        assert_eq!(config.tutorial, "dir_test.md");
+
+        // Cleanup
+        std::fs::remove_file(&config_path).ok();
+        std::fs::remove_dir(&temp_dir).ok();
+    }
+
+    #[test]
+    fn test_load_from_dir_no_config_returns_default() {
+        let temp_dir = std::env::temp_dir().join("test_smile_empty_dir");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        // Directory exists but no smile.json
+        let config = Config::load_from_dir(&temp_dir).unwrap();
+        assert_eq!(config.tutorial, "tutorial.md");
+        assert_eq!(config.llm_provider, LlmProvider::Claude);
+
+        // Cleanup
+        std::fs::remove_dir(&temp_dir).ok();
+    }
+
+    #[test]
+    fn test_unknown_fields_ignored() {
+        // Unknown fields at root level should be silently ignored (forward compatibility)
+        let json = r#"{
+            "tutorial": "test.md",
+            "unknownField": "should be ignored",
+            "anotherUnknown": 123
+        }"#;
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(config.tutorial, "test.md");
     }
 }
