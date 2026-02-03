@@ -181,27 +181,27 @@ Shared infrastructure required by all user stories.
 **Independent Test**: Verify container starts, resets between iterations, cleans up properly
 
 ### Phase Start
-- [ ] T079 [GIT] Verify working tree is clean before starting Phase 5
-- [ ] T080 [GIT] Pull and rebase on origin/main if needed
-- [ ] T081 [US4] Create retro/P5.md for this phase
-- [ ] T082 [GIT] Commit: initialize phase 5 retro
+- [x] T079 [GIT] Verify working tree is clean before starting Phase 5
+- [x] T080 [GIT] Pull and rebase on origin/main if needed
+- [x] T081 [US4] Create retro/P5.md for this phase
+- [x] T082 [GIT] Commit: initialize phase 5 retro
 
 ### Implementation
-- [ ] T083 [US4] Create Container and ContainerStatus types in crates/smile-container/src/lib.rs (use devs:rust-dev agent)
-- [ ] T084 [GIT] Commit: add container types
-- [ ] T085 [US4] Implement Docker connection and health check via bollard in crates/smile-container/src/manager.rs (use devs:rust-dev agent)
-- [ ] T086 [GIT] Commit: implement Docker connection
-- [ ] T087 [US4] Implement container creation with volume mounts in crates/smile-container/src/manager.rs (use devs:rust-dev agent)
-- [ ] T088 [GIT] Commit: add container creation with mounts
-- [ ] T089 [US4] Implement container start/stop/remove lifecycle in crates/smile-container/src/manager.rs (use devs:rust-dev agent)
-- [ ] T090 [GIT] Commit: implement container lifecycle
-- [ ] T091 [US4] Implement container reset (stop, remove, recreate) in crates/smile-container/src/manager.rs (use devs:rust-dev agent)
-- [ ] T092 [GIT] Commit: add container reset
+- [x] T083 [US4] Create Container and ContainerStatus types in crates/smile-container/src/lib.rs (use devs:rust-dev agent)
+- [x] T084 [GIT] Commit: add container types
+- [x] T085 [US4] Implement Docker connection and health check via bollard in crates/smile-container/src/manager.rs (use devs:rust-dev agent)
+- [x] T086 [GIT] Commit: implement Docker connection
+- [x] T087 [US4] Implement container creation with volume mounts in crates/smile-container/src/manager.rs (use devs:rust-dev agent)
+- [x] T088 [GIT] Commit: add container creation with mounts
+- [x] T089 [US4] Implement container start/stop/remove lifecycle in crates/smile-container/src/manager.rs (use devs:rust-dev agent)
+- [x] T090 [GIT] Commit: implement container lifecycle
+- [x] T091 [US4] Implement container reset (stop, remove, recreate) in crates/smile-container/src/manager.rs (use devs:rust-dev agent)
+- [x] T092 [GIT] Commit: add container reset
 
 ### Phase Completion
-- [ ] T093 [US4] Run /sdd:map incremental for Phase 5 changes
-- [ ] T094 [GIT] Commit: update codebase documents for phase 5
-- [ ] T095 [US4] Review retro/P5.md and extract critical learnings to CLAUDE.md (conservative)
+- [x] T093 [US4] Run /sdd:map incremental for Phase 5 changes (skipped - not configured)
+- [x] T094 [GIT] Commit: update codebase documents for phase 5 (skipped - not configured)
+- [x] T095 [US4] Review retro/P5.md and extract critical learnings to CLAUDE.md (conservative)
 - [ ] T096 [GIT] Commit: finalize phase 5 retro
 - [ ] T097 [GIT] Push branch to origin (ensure pre-push hooks pass)
 - [ ] T098 [GIT] Create/update PR to main with phase summary

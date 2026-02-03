@@ -27,7 +27,7 @@
 
 pub mod manager;
 
-pub use manager::ContainerManager;
+pub use manager::{ContainerManager, CreateContainerOptions};
 
 use std::path::PathBuf;
 

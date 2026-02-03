@@ -106,9 +106,12 @@ Strict clippy configuration requires these patterns:
 4. **let-else over match**: Use `let Some(x) = opt else { continue };` instead of `match opt { Some(x) => x, None => continue }`
 5. **MSRV compliance**: Project MSRV is 1.75. Avoid `std::sync::LazyLock` (requires 1.80). Use `once_cell` crate or recreate resources.
 6. **Raw strings**: Prefer `r"..."` over `r#"..."#` when content has no quotes
+7. **Test module allows**: Tests need `#[allow(clippy::unwrap_used)]` on `mod tests`. Also allow `expect_used` and `panic` if needed: `#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]`
+8. **Doc comment backticks**: Use backticks around method/type names in doc comments: `/// Test that \`start_container\` returns`
 
 ## Recent Changes
 
+- 2026-02-03: Phase 5 complete - container management via bollard (create, start, stop, remove, reset)
 - 2026-02-03: Phase 4 complete - tutorial loading, image extraction, CLI integration
 - 2026-02-03: Phase 3 complete - config loading, validation, CLI integration
 - 2026-02-02: Initial planning phase for 001-smile-loop feature
