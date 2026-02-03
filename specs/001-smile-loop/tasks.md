@@ -229,8 +229,8 @@ Shared infrastructure required by all user stories.
 - [x] T109 [US6] Implement stuck detection logic based on triggers in python/smile_wrappers/student.py (use devs:python-expert agent)
 - [x] T110 [GIT] Commit: add stuck detection
 - [x] T111 [US5] Implement structured output parsing with recovery in python/smile_wrappers/output.py (use devs:python-expert agent)
-- [ ] T112 [GIT] Commit: add output parsing with recovery
-- [ ] T113 [US5] Implement HTTP callback to orchestrator in python/smile_wrappers/student.py (use devs:python-expert agent)
+- [x] T112 [GIT] Commit: add output parsing with recovery
+- [x] T113 [US5] Implement HTTP callback to orchestrator in python/smile_wrappers/student.py (use devs:python-expert agent)
 - [ ] T114 [GIT] Commit: add orchestrator callback
 
 ### Phase Completion

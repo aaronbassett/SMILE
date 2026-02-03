@@ -12,17 +12,39 @@ from smile_wrappers.prompts import (
     build_student_prompt,
     get_student_output_schema,
 )
+from smile_wrappers.student import (
+    LlmCli,
+    LlmCliError,
+    LlmParseError,
+    LlmTimeoutError,
+    NextAction,
+    OrchestratorCallbackError,
+    OrchestratorClient,
+    StuckCondition,
+    StuckDetector,
+    StudentWrapper,
+)
 
 __version__ = "0.1.0"
 
 __all__ = [
     "Config",
+    "LlmCli",
+    "LlmCliError",
+    "LlmParseError",
     "LlmProvider",
+    "LlmTimeoutError",
+    "NextAction",
+    "OrchestratorCallbackError",
+    "OrchestratorClient",
     "OutputParseError",
     "OutputParser",
     "PatienceLevel",
+    "StuckCondition",
+    "StuckDetector",
     "StudentBehavior",
     "StudentOutput",
+    "StudentWrapper",
     "build_mentor_prompt",
     "build_student_prompt",
     "get_student_output_schema",

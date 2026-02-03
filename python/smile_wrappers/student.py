@@ -3,6 +3,9 @@
 This module implements the Student agent that follows tutorial instructions
 step-by-step, invoking an LLM CLI to simulate a constrained learner.
 When the student encounters difficulties, it escalates to the Mentor agent.
+
+The module also provides HTTP callback functionality to report results back
+to the orchestrator via the `OrchestratorClient` class.
 """
 
 from __future__ import annotations
@@ -12,12 +15,15 @@ import os
 import re
 import subprocess
 import sys
+import time
 from collections import defaultdict
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pydantic import ValidationError
+import httpx
+from pydantic import BaseModel, Field, ValidationError
 
 from smile_wrappers.config import Config, LlmProvider, StudentBehavior
 from smile_wrappers.output import StudentOutput
@@ -31,8 +37,13 @@ __all__ = [
     "LlmCliError",
     "LlmParseError",
     "LlmTimeoutError",
+    "NextAction",
+    "OrchestratorCallbackError",
+    "OrchestratorClient",
     "StuckCondition",
     "StuckDetector",
+    "StudentResultRequest",
+    "StudentResultResponse",
     "StudentWrapper",
     "main",
 ]
@@ -45,6 +56,17 @@ DEFAULT_MENTOR_NOTES_FILE = "/workspace/mentor_notes.json"
 
 # Maximum retry attempts for JSON parsing
 MAX_PARSE_RETRIES = 3
+
+# Default orchestrator URL (from inside Docker container)
+DEFAULT_ORCHESTRATOR_URL = "http://host.docker.internal:3000"
+
+# HTTP client retry configuration
+MAX_HTTP_RETRIES = 3
+INITIAL_BACKOFF_SECONDS = 1.0
+MAX_BACKOFF_SECONDS = 10.0
+
+# Special exit code for stop action
+EXIT_CODE_STOP = 42
 
 
 class StuckCondition(Enum):
@@ -71,6 +93,278 @@ class StuckCondition(Enum):
     COMMAND_FAILURE = "command_failure"
     PARSE_FAILURE = "parse_failure"
     CANNOT_COMPLETE = "cannot_complete"
+
+
+class NextAction(Enum):
+    """Action to take after reporting result to orchestrator.
+
+    The orchestrator responds with one of these actions to indicate
+    what the wrapper should do next.
+
+    Attributes:
+        CONTINUE: Continue normal execution (exit 0).
+        STOP: Stop execution immediately (exit with special code).
+    """
+
+    CONTINUE = "continue"
+    STOP = "stop"
+
+
+class OrchestratorCallbackError(Exception):
+    """Exception raised when orchestrator callback fails.
+
+    Raised when the HTTP request to the orchestrator fails due to
+    connection issues, timeouts, or unexpected responses.
+
+    Attributes:
+        status_code: HTTP status code if available, None for connection errors.
+        response_body: Response body text if available, None otherwise.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        response_body: str | None = None,
+    ) -> None:
+        """Initialize OrchestratorCallbackError.
+
+        Args:
+            message: Human-readable error message.
+            status_code: HTTP status code if available.
+            response_body: Response body text if available.
+        """
+        super().__init__(message)
+        self.status_code = status_code
+        self.response_body = response_body
+
+    def __str__(self) -> str:
+        """Return a string representation including context."""
+        parts = [super().__str__()]
+        if self.status_code is not None:
+            parts.append(f"Status: {self.status_code}")
+        if self.response_body:
+            truncated = (
+                self.response_body[:200] + "..."
+                if len(self.response_body) > 200
+                else self.response_body
+            )
+            parts.append(f"Body: {truncated}")
+        return " | ".join(parts)
+
+
+class StudentResultRequest(BaseModel):
+    """Request body for reporting student result to the orchestrator.
+
+    This model is serialized to JSON when calling the orchestrator's
+    `/api/student/result` endpoint.
+
+    Attributes:
+        student_output: The StudentOutput from the wrapper execution.
+        timestamp: ISO8601 timestamp when the result was produced.
+    """
+
+    student_output: StudentOutput = Field(alias="studentOutput")
+    timestamp: datetime
+
+    model_config = {"populate_by_name": True}
+
+
+class StudentResultResponse(BaseModel):
+    """Response from orchestrator after reporting student result.
+
+    Received from the orchestrator's `/api/student/result` endpoint
+    after successfully reporting a result.
+
+    Attributes:
+        acknowledged: Whether the orchestrator acknowledged the result.
+        next_action: The action the wrapper should take next.
+    """
+
+    acknowledged: bool
+    next_action: NextAction = Field(alias="nextAction")
+
+    model_config = {"populate_by_name": True}
+
+
+class OrchestratorClient:
+    """HTTP client for communicating with the SMILE orchestrator.
+
+    Handles sending student results back to the orchestrator and
+    receiving instructions for the next action. Implements retry
+    logic with exponential backoff for transient failures.
+
+    Attributes:
+        base_url: The base URL of the orchestrator API.
+        timeout_seconds: Timeout for HTTP requests in seconds.
+
+    Example:
+        >>> client = OrchestratorClient(base_url="http://localhost:3000")
+        >>> output = StudentOutput(
+        ...     status="completed",
+        ...     current_step="Step 1",
+        ...     attempted_actions=["action"],
+        ...     summary="Done",
+        ... )
+        >>> action = client.report_student_result(output)
+        >>> action
+        <NextAction.CONTINUE: 'continue'>
+    """
+
+    def __init__(
+        self,
+        base_url: str = DEFAULT_ORCHESTRATOR_URL,
+        timeout_seconds: float = 30.0,
+    ) -> None:
+        """Initialize the OrchestratorClient.
+
+        Args:
+            base_url: The base URL of the orchestrator API.
+                Defaults to the Docker internal hostname.
+            timeout_seconds: Timeout for HTTP requests in seconds.
+                Defaults to 30 seconds.
+        """
+        # Ensure base_url doesn't have trailing slash
+        self.base_url = base_url.rstrip("/")
+        self.timeout_seconds = timeout_seconds
+
+    def _log(self, message: str) -> None:
+        """Log a message to stderr.
+
+        Args:
+            message: The message to log.
+        """
+        print(f"[OrchestratorClient] {message}", file=sys.stderr)
+
+    def _calculate_backoff(self, attempt: int) -> float:
+        """Calculate backoff duration for a retry attempt.
+
+        Uses exponential backoff with a maximum cap.
+
+        Args:
+            attempt: The current attempt number (0-indexed).
+
+        Returns:
+            The number of seconds to wait before retrying.
+        """
+        backoff = INITIAL_BACKOFF_SECONDS * (2**attempt)
+        return float(min(backoff, MAX_BACKOFF_SECONDS))
+
+    def report_student_result(self, output: StudentOutput) -> NextAction:
+        """Report a student result to the orchestrator.
+
+        Sends the StudentOutput to the orchestrator's `/api/student/result`
+        endpoint and returns the next action to take.
+
+        Implements retry logic with exponential backoff for connection
+        errors and 5xx server errors.
+
+        Args:
+            output: The StudentOutput to report.
+
+        Returns:
+            The NextAction indicating what the wrapper should do next.
+
+        Raises:
+            OrchestratorCallbackError: If the callback fails after all retries.
+        """
+        endpoint = f"{self.base_url}/api/student/result"
+        timestamp = datetime.now(UTC)
+
+        request = StudentResultRequest(
+            studentOutput=output,
+            timestamp=timestamp,
+        )
+
+        # Serialize with camelCase aliases for the API
+        request_body = request.model_dump(mode="json", by_alias=True)
+
+        last_error: Exception | None = None
+
+        for attempt in range(MAX_HTTP_RETRIES):
+            try:
+                self._log(f"Reporting result to {endpoint} (attempt {attempt + 1})")
+
+                with httpx.Client(timeout=self.timeout_seconds) as client:
+                    response = client.post(
+                        endpoint,
+                        json=request_body,
+                        headers={"Content-Type": "application/json"},
+                    )
+
+                # Handle specific HTTP status codes
+                if response.status_code == 200:
+                    try:
+                        response_data = response.json()
+                        result = StudentResultResponse.model_validate(response_data)
+                        self._log(f"Result acknowledged, next action: {result.next_action.value}")
+                        return result.next_action
+                    except (json.JSONDecodeError, ValidationError) as e:
+                        raise OrchestratorCallbackError(
+                            f"Invalid response from orchestrator: {e}",
+                            status_code=response.status_code,
+                            response_body=response.text,
+                        ) from e
+
+                if response.status_code == 400:
+                    # Client error - don't retry
+                    raise OrchestratorCallbackError(
+                        "Invalid request to orchestrator (400 Bad Request)",
+                        status_code=response.status_code,
+                        response_body=response.text,
+                    )
+
+                if response.status_code == 503:
+                    # Service unavailable - may be transient, retry
+                    self._log("Orchestrator unavailable (503), will retry")
+                    last_error = OrchestratorCallbackError(
+                        "Orchestrator unavailable (503 Service Unavailable)",
+                        status_code=response.status_code,
+                        response_body=response.text,
+                    )
+                elif response.status_code >= 500:
+                    # Other server errors - retry
+                    self._log(f"Server error ({response.status_code}), will retry")
+                    last_error = OrchestratorCallbackError(
+                        f"Orchestrator server error ({response.status_code})",
+                        status_code=response.status_code,
+                        response_body=response.text,
+                    )
+                else:
+                    # Unexpected status code - don't retry
+                    raise OrchestratorCallbackError(
+                        f"Unexpected response from orchestrator ({response.status_code})",
+                        status_code=response.status_code,
+                        response_body=response.text,
+                    )
+
+            except httpx.ConnectError as e:
+                self._log(f"Connection error: {e}")
+                last_error = OrchestratorCallbackError(
+                    f"Failed to connect to orchestrator at {self.base_url}: {e}",
+                )
+
+            except httpx.TimeoutException as e:
+                self._log(f"Request timed out: {e}")
+                last_error = OrchestratorCallbackError(
+                    f"Request to orchestrator timed out after {self.timeout_seconds}s",
+                )
+
+            except OrchestratorCallbackError:
+                # Re-raise non-retryable errors
+                raise
+
+            # Wait before retrying (except on last attempt)
+            if attempt < MAX_HTTP_RETRIES - 1:
+                backoff = self._calculate_backoff(attempt)
+                self._log(f"Waiting {backoff:.1f}s before retry")
+                time.sleep(backoff)
+
+        # All retries exhausted
+        raise last_error or OrchestratorCallbackError(
+            "Failed to report result to orchestrator after all retries"
+        )
 
 
 # Patterns for detecting missing dependencies
@@ -936,23 +1230,64 @@ def _load_tutorial_content(tutorial_dir: Path) -> str:
     )
 
 
+def _report_result_to_orchestrator(
+    result: StudentOutput,
+    orchestrator_url: str,
+) -> None:
+    """Report student result to orchestrator and exit appropriately.
+
+    Args:
+        result: The StudentOutput to report.
+        orchestrator_url: Base URL of the orchestrator.
+
+    Raises:
+        SystemExit: Always exits with appropriate code.
+    """
+    try:
+        client = OrchestratorClient(base_url=orchestrator_url)
+        action = client.report_student_result(result)
+
+        if action == NextAction.STOP:
+            print("[main] Orchestrator requested stop", file=sys.stderr)
+            sys.exit(EXIT_CODE_STOP)
+        else:
+            print("[main] Orchestrator requested continue", file=sys.stderr)
+            sys.exit(0)
+
+    except OrchestratorCallbackError as e:
+        print(f"Error: Failed to report result to orchestrator: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
 def main() -> None:
     """Entry point for student wrapper.
 
     Loads configuration and tutorial content from the environment or
-    mounted volumes, runs the student wrapper, and outputs the result.
+    mounted volumes, runs the student wrapper, reports the result to
+    the orchestrator via HTTP callback, and exits based on the
+    orchestrator's response.
 
     Environment variables:
         SMILE_CONFIG_FILE: Path to config JSON file (default: /workspace/config.json)
         SMILE_TUTORIAL_DIR: Path to tutorial directory (default: /workspace/tutorial)
         SMILE_MENTOR_NOTES_FILE: Path to mentor notes JSON (default: /workspace/mentor_notes.json)
         SMILE_ITERATION: Current iteration number (default: 1)
+        SMILE_ORCHESTRATOR_URL: Orchestrator base URL
+            (default: http://host.docker.internal:3000)
+        SMILE_SKIP_CALLBACK: If set to "true", skip HTTP callback (for testing)
+
+    Exit codes:
+        0: Success (NextAction.CONTINUE)
+        1: Error during execution
+        42: Stop requested by orchestrator (NextAction.STOP)
     """
     # Get paths from environment or use defaults
     config_path = Path(os.environ.get("SMILE_CONFIG_FILE", DEFAULT_CONFIG_FILE))
     tutorial_dir = Path(os.environ.get("SMILE_TUTORIAL_DIR", DEFAULT_TUTORIAL_DIR))
     mentor_notes_path = Path(os.environ.get("SMILE_MENTOR_NOTES_FILE", DEFAULT_MENTOR_NOTES_FILE))
     iteration = int(os.environ.get("SMILE_ITERATION", "1"))
+    orchestrator_url = os.environ.get("SMILE_ORCHESTRATOR_URL", DEFAULT_ORCHESTRATOR_URL)
+    skip_callback = os.environ.get("SMILE_SKIP_CALLBACK", "").lower() == "true"
 
     # Load configuration
     try:
@@ -992,11 +1327,18 @@ def main() -> None:
 
     try:
         result = wrapper.run()
-        # Output result as JSON for the orchestrator to consume
+        # Output result as JSON for debugging/logging
         print(result.model_dump_json(indent=2))
     except LlmCliError as e:
         print(f"Error: LLM CLI failed: {e}", file=sys.stderr)
         sys.exit(1)
+
+    # Report result to orchestrator via HTTP callback
+    if skip_callback:
+        print("[main] Skipping HTTP callback (SMILE_SKIP_CALLBACK=true)", file=sys.stderr)
+        sys.exit(0)
+
+    _report_result_to_orchestrator(result, orchestrator_url)
 
 
 if __name__ == "__main__":
