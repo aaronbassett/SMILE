@@ -2,11 +2,34 @@
 //!
 //! This module defines the state machine types for tracking loop execution,
 //! including status, iteration history, and mentor consultations.
+//!
+//! ## Persistence
+//!
+//! The [`LoopState`] supports file persistence for crash recovery:
+//! - [`LoopState::save`] writes state atomically to disk
+//! - [`LoopState::load`] reads state from disk
+//! - [`LoopState::acquire_lock`] prevents concurrent loop execution
+//!
+//! State files are versioned for forward compatibility.
+
+use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use tokio::fs;
+use tokio::io::AsyncWriteExt;
 
 use crate::error::{Result, SmileError};
+
+/// Current schema version for state file serialization.
+///
+/// Increment this when making breaking changes to the state format.
+pub const STATE_VERSION: u32 = 1;
+
+/// Default version for deserialization when version field is missing.
+const fn default_version() -> u32 {
+    STATE_VERSION
+}
 
 // ============================================================================
 // LoopStatus
@@ -282,8 +305,29 @@ impl IterationRecord {
 ///
 /// This state is persisted to disk for crash recovery and can be serialized
 /// to JSON for the status API endpoint.
+///
+/// ## Version Compatibility
+///
+/// The `version` field enables forward compatibility. When loading state files:
+/// - Version 1 (current): All fields as documented
+/// - Missing version: Treated as version 1 (backward compatible)
+///
+/// ## Example
+///
+/// ```
+/// use smile_orchestrator::LoopState;
+///
+/// let state = LoopState::new();
+/// assert_eq!(state.version, 1);
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoopState {
+    /// Schema version for this state file.
+    ///
+    /// Used for forward compatibility when the state format changes.
+    #[serde(default = "default_version")]
+    pub version: u32,
+
     /// Current status of the loop.
     pub status: LoopStatus,
 
@@ -337,6 +381,7 @@ impl LoopState {
     pub fn new() -> Self {
         let now = Utc::now();
         Self {
+            version: STATE_VERSION,
             status: LoopStatus::Starting,
             iteration: 0,
             mentor_notes: Vec::new(),
@@ -731,6 +776,234 @@ impl LoopState {
         self.error_message = Some(message);
         self.touch();
         Ok(())
+    }
+
+    // ========================================================================
+    // Persistence Methods
+    // ========================================================================
+
+    /// Saves the state to the specified file path.
+    ///
+    /// This method performs an atomic write by:
+    /// 1. Writing to a temporary file (`{path}.tmp`)
+    /// 2. Renaming the temporary file to the target path
+    ///
+    /// This ensures the state file is never in a partial/corrupted state
+    /// if the process crashes during write.
+    ///
+    /// Parent directories are created if they don't exist.
+    ///
+    /// # Errors
+    ///
+    /// Returns `SmileError::Io` if:
+    /// - Parent directory cannot be created
+    /// - Temporary file cannot be written
+    /// - File cannot be renamed
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::path::Path;
+    /// use smile_orchestrator::LoopState;
+    ///
+    /// # async fn example() -> smile_orchestrator::Result<()> {
+    /// let state = LoopState::new();
+    /// state.save(Path::new(".smile/state.json")).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn save(&self, path: &Path) -> Result<()> {
+        // Create parent directories if needed
+        if let Some(parent) = path.parent() {
+            if !parent.as_os_str().is_empty() {
+                fs::create_dir_all(parent).await?;
+            }
+        }
+
+        // Serialize to JSON with pretty printing for debuggability
+        let json = serde_json::to_string_pretty(self)?;
+
+        // Write to temporary file first for atomicity
+        let tmp_path = path.with_extension("json.tmp");
+        let mut file = fs::File::create(&tmp_path).await?;
+        file.write_all(json.as_bytes()).await?;
+        file.sync_all().await?;
+
+        // Atomic rename
+        fs::rename(&tmp_path, path).await?;
+
+        Ok(())
+    }
+
+    /// Loads state from the specified file path.
+    ///
+    /// Returns `None` if the file does not exist (indicating a fresh start).
+    /// Returns the deserialized state if the file exists and is valid.
+    ///
+    /// # Errors
+    ///
+    /// Returns `SmileError::StateFileCorrupted` if the file exists but
+    /// contains invalid JSON.
+    ///
+    /// Returns `SmileError::Io` for other file system errors.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::path::Path;
+    /// use smile_orchestrator::LoopState;
+    ///
+    /// # async fn example() -> smile_orchestrator::Result<()> {
+    /// let state = LoopState::load(Path::new(".smile/state.json")).await?;
+    /// match state {
+    ///     Some(s) => println!("Resuming from iteration {}", s.iteration),
+    ///     None => println!("Fresh start"),
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn load(path: &Path) -> Result<Option<Self>> {
+        let contents = match fs::read_to_string(path).await {
+            Ok(contents) => contents,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(None);
+            }
+            Err(e) => return Err(e.into()),
+        };
+
+        let state: Self = serde_json::from_str(&contents)
+            .map_err(|e| SmileError::state_corrupted(path, format!("invalid JSON: {e}")))?;
+
+        Ok(Some(state))
+    }
+
+    /// Attempts to acquire an exclusive lock on the state file.
+    ///
+    /// This prevents multiple SMILE loops from running concurrently on the
+    /// same tutorial. The lock is held until the returned [`StateLock`] is
+    /// dropped.
+    ///
+    /// The lock file is created at `{path}.lock` (e.g., `.smile/state.lock`
+    /// for `.smile/state.json`).
+    ///
+    /// # Errors
+    ///
+    /// Returns `SmileError::LoopAlreadyRunning` if another process holds
+    /// the lock.
+    ///
+    /// Returns `SmileError::Io` for file system errors.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::path::Path;
+    /// use smile_orchestrator::LoopState;
+    ///
+    /// # async fn example() -> smile_orchestrator::Result<()> {
+    /// let lock = LoopState::acquire_lock(Path::new(".smile/state.json")).await?;
+    /// // Lock is held while `lock` is in scope
+    /// println!("Lock acquired, running loop...");
+    /// // Lock is automatically released when `lock` is dropped
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn acquire_lock(path: &Path) -> Result<StateLock> {
+        StateLock::acquire(path).await
+    }
+}
+
+// ============================================================================
+// StateLock
+// ============================================================================
+
+/// A guard that holds an exclusive lock on a state file.
+///
+/// The lock is held as long as this struct exists and is automatically
+/// released when dropped. This prevents multiple SMILE loops from running
+/// concurrently.
+///
+/// ## Implementation
+///
+/// The lock uses a simple lock file approach with `O_CREAT | O_EXCL` semantics:
+/// - Creating the lock file atomically fails if it already exists
+/// - The lock file is deleted when the guard is dropped
+/// - The lock file contains the process ID for debugging
+///
+/// ## Example
+///
+/// ```no_run
+/// use std::path::Path;
+/// use smile_orchestrator::LoopState;
+///
+/// # async fn example() -> smile_orchestrator::Result<()> {
+/// // Acquire lock
+/// let lock = LoopState::acquire_lock(Path::new(".smile/state.json")).await?;
+///
+/// // Do work while lock is held...
+///
+/// // Lock is released when `lock` goes out of scope
+/// drop(lock);
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Debug)]
+pub struct StateLock {
+    /// Path to the lock file.
+    lock_path: PathBuf,
+}
+
+impl StateLock {
+    /// Lock file extension added to state file path.
+    const LOCK_EXTENSION: &'static str = "lock";
+
+    /// Attempts to acquire an exclusive lock.
+    ///
+    /// Creates a lock file adjacent to the state file. The lock file
+    /// contains the current process ID for debugging purposes.
+    async fn acquire(state_path: &Path) -> Result<Self> {
+        // Compute lock file path: .smile/state.json -> .smile/state.lock
+        let lock_path = state_path.with_extension(Self::LOCK_EXTENSION);
+
+        // Create parent directories if needed
+        if let Some(parent) = lock_path.parent() {
+            if !parent.as_os_str().is_empty() {
+                fs::create_dir_all(parent).await?;
+            }
+        }
+
+        // Try to create the lock file exclusively
+        // This is atomic on POSIX systems
+        let lock_result = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lock_path);
+
+        match lock_result {
+            Ok(mut file) => {
+                // Write PID to lock file for debugging
+                use std::io::Write;
+                let pid = std::process::id();
+                let _ = writeln!(file, "{pid}");
+                Ok(Self { lock_path })
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                Err(SmileError::loop_already_running(state_path))
+            }
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Returns the path to the lock file.
+    #[must_use]
+    pub fn lock_path(&self) -> &Path {
+        &self.lock_path
+    }
+}
+
+impl Drop for StateLock {
+    fn drop(&mut self) {
+        // Best-effort cleanup - ignore errors during drop
+        let _ = std::fs::remove_file(&self.lock_path);
     }
 }
 
@@ -1721,5 +1994,322 @@ mod tests {
         // Fields should not be present when None
         assert!(!json.contains("error_message"));
         assert!(!json.contains("current_question"));
+    }
+
+    // ------------------------------------------------------------------------
+    // Version field tests
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_loop_state_has_version() {
+        let state = LoopState::new();
+        assert_eq!(state.version, STATE_VERSION);
+        assert_eq!(state.version, 1);
+    }
+
+    #[test]
+    fn test_version_serialization() {
+        let state = LoopState::new();
+        let json = serde_json::to_string(&state).unwrap();
+        assert!(json.contains(r#""version":1"#) || json.contains(r#""version": 1"#));
+    }
+
+    #[test]
+    fn test_version_defaults_on_missing() {
+        // Simulate loading old state without version field
+        let json = r#"{
+            "status": "starting",
+            "iteration": 0,
+            "mentor_notes": [],
+            "history": [],
+            "started_at": "2026-02-03T10:00:00Z",
+            "updated_at": "2026-02-03T10:00:00Z"
+        }"#;
+
+        let state: LoopState = serde_json::from_str(json).unwrap();
+        // Should default to current version
+        assert_eq!(state.version, STATE_VERSION);
+    }
+
+    // ------------------------------------------------------------------------
+    // Persistence tests (async)
+    // ------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_save_and_load_roundtrip() {
+        let temp_dir = std::env::temp_dir().join("smile_test_roundtrip");
+        let state_path = temp_dir.join("state.json");
+
+        // Create a state with some data
+        let mut state = LoopState::new();
+        state.start().unwrap();
+        state.iteration = 3;
+        state.add_mentor_note(MentorNote::new(1, "Q1", "A1"));
+
+        // Save
+        state.save(&state_path).await.unwrap();
+
+        // Verify file exists
+        assert!(state_path.exists());
+
+        // Load
+        let loaded = LoopState::load(&state_path).await.unwrap();
+        assert!(loaded.is_some());
+
+        let loaded = loaded.unwrap();
+        assert_eq!(loaded.version, state.version);
+        assert_eq!(loaded.status, LoopStatus::RunningStudent);
+        assert_eq!(loaded.iteration, 3);
+        assert_eq!(loaded.mentor_notes.len(), 1);
+        assert_eq!(loaded.mentor_notes[0].question, "Q1");
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_load_missing_file_returns_none() {
+        let nonexistent = std::path::PathBuf::from("/nonexistent/path/state.json");
+        let result = LoopState::load(&nonexistent).await.unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_save_creates_parent_directories() {
+        let temp_dir = std::env::temp_dir().join("smile_test_mkdir");
+        let nested_path = temp_dir.join("a").join("b").join("c").join("state.json");
+
+        // Ensure parent doesn't exist
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        assert!(!temp_dir.exists());
+
+        // Save should create directories
+        let state = LoopState::new();
+        state.save(&nested_path).await.unwrap();
+
+        // Verify file was created
+        assert!(nested_path.exists());
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_atomic_write_creates_temp_file() {
+        let temp_dir = std::env::temp_dir().join("smile_test_atomic");
+        let state_path = temp_dir.join("state.json");
+        let tmp_path = state_path.with_extension("json.tmp");
+
+        // Ensure clean slate
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
+        let state = LoopState::new();
+        state.save(&state_path).await.unwrap();
+
+        // The temp file should NOT exist after save completes
+        // (it should have been renamed to the final path)
+        assert!(!tmp_path.exists());
+        assert!(state_path.exists());
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_load_corrupted_state_returns_error() {
+        let temp_dir = std::env::temp_dir().join("smile_test_corrupt");
+        let state_path = temp_dir.join("state.json");
+
+        // Create directory and write invalid JSON
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        std::fs::write(&state_path, "{ not valid json }").unwrap();
+
+        let result = LoopState::load(&state_path).await;
+        assert!(result.is_err());
+
+        let err = result.unwrap_err();
+        let err_string = err.to_string();
+        assert!(
+            err_string.contains("Corrupted state file"),
+            "Expected StateFileCorrupted error, got: {err_string}"
+        );
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    // ------------------------------------------------------------------------
+    // StateLock tests
+    // ------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_acquire_lock_creates_lock_file() {
+        let temp_dir = std::env::temp_dir().join("smile_test_lock_create");
+        let state_path = temp_dir.join("state.json");
+        let lock_path = state_path.with_extension("lock");
+
+        // Ensure clean slate
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
+        // Acquire lock
+        let lock = LoopState::acquire_lock(&state_path).await.unwrap();
+
+        // Lock file should exist
+        assert!(lock_path.exists());
+        assert_eq!(lock.lock_path(), lock_path);
+
+        // Lock file should contain PID
+        let contents = std::fs::read_to_string(&lock_path).unwrap();
+        let pid: u32 = contents.trim().parse().unwrap();
+        assert_eq!(pid, std::process::id());
+
+        // Cleanup (drop lock first)
+        drop(lock);
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_lock_released_on_drop() {
+        let temp_dir = std::env::temp_dir().join("smile_test_lock_drop");
+        let state_path = temp_dir.join("state.json");
+        let lock_path = state_path.with_extension("lock");
+
+        // Ensure clean slate
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
+        // Acquire and drop lock
+        {
+            let _lock = LoopState::acquire_lock(&state_path).await.unwrap();
+            assert!(lock_path.exists());
+        }
+
+        // Lock file should be deleted after drop
+        assert!(!lock_path.exists());
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_acquire_lock_fails_when_already_held() {
+        let temp_dir = std::env::temp_dir().join("smile_test_lock_conflict");
+        let state_path = temp_dir.join("state.json");
+
+        // Ensure clean slate
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
+        // Acquire first lock
+        let lock1 = LoopState::acquire_lock(&state_path).await.unwrap();
+
+        // Second attempt should fail
+        let result = LoopState::acquire_lock(&state_path).await;
+        assert!(result.is_err());
+
+        let err = result.unwrap_err();
+        let err_string = err.to_string();
+        assert!(
+            err_string.contains("SMILE loop is already running"),
+            "Expected LoopAlreadyRunning error, got: {err_string}"
+        );
+
+        // Cleanup
+        drop(lock1);
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_lock_can_be_reacquired_after_release() {
+        let temp_dir = std::env::temp_dir().join("smile_test_lock_reacquire");
+        let state_path = temp_dir.join("state.json");
+
+        // Ensure clean slate
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
+        // First lock
+        {
+            let _lock1 = LoopState::acquire_lock(&state_path).await.unwrap();
+        }
+
+        // Second lock should succeed after first is released
+        let lock2 = LoopState::acquire_lock(&state_path).await;
+        assert!(lock2.is_ok());
+
+        // Cleanup
+        drop(lock2);
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_lock_creates_parent_directories() {
+        let temp_dir = std::env::temp_dir().join("smile_test_lock_mkdir");
+        let nested_path = temp_dir.join("deep").join("nested").join("state.json");
+
+        // Ensure clean slate
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        assert!(!temp_dir.exists());
+
+        // Acquire lock - should create directories
+        let lock = LoopState::acquire_lock(&nested_path).await.unwrap();
+
+        // Verify lock file was created
+        assert!(lock.lock_path().exists());
+
+        // Cleanup
+        drop(lock);
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_save_load_with_full_state() {
+        let temp_dir = std::env::temp_dir().join("smile_test_full_state");
+        let state_path = temp_dir.join("state.json");
+
+        // Ensure clean slate
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
+        // Create a comprehensive state
+        let mut state = LoopState::new();
+        state.start().unwrap();
+        state.start_waiting_for_student().unwrap();
+
+        let output = StudentOutput {
+            status: StudentStatus::AskMentor,
+            current_step: "Step 1: Install deps".to_string(),
+            attempted_actions: vec!["npm install".to_string()],
+            problem: Some("Package not found".to_string()),
+            question_for_mentor: Some("Which package manager?".to_string()),
+            reason: None,
+            summary: "Need help with deps".to_string(),
+            files_created: vec!["package.json".to_string()],
+            commands_run: vec!["npm init -y".to_string()],
+        };
+        state.receive_student_result(output, 10).unwrap();
+        state.start_waiting_for_mentor().unwrap();
+        state
+            .receive_mentor_result(
+                "Use yarn instead".to_string(),
+                "Which package manager?".to_string(),
+            )
+            .unwrap();
+
+        // Save
+        state.save(&state_path).await.unwrap();
+
+        // Load and verify
+        let loaded = LoopState::load(&state_path).await.unwrap().unwrap();
+
+        assert_eq!(loaded.version, STATE_VERSION);
+        assert_eq!(loaded.status, LoopStatus::RunningStudent);
+        assert_eq!(loaded.iteration, 2);
+        assert_eq!(loaded.history.len(), 1);
+        assert_eq!(loaded.mentor_notes.len(), 1);
+        assert_eq!(
+            loaded.history[0].student_output.current_step,
+            "Step 1: Install deps"
+        );
+        assert_eq!(loaded.mentor_notes[0].answer, "Use yarn instead");
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

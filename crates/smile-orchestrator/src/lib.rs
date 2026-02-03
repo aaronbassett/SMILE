@@ -15,6 +15,7 @@ pub use api::{
 pub use config::{Config, ContainerConfig, LlmProvider, PatienceLevel, StudentBehavior};
 pub use error::{LlmErrorKind, Result, SmileError};
 pub use loop_state::{
-    IterationRecord, LoopState, LoopStatus, MentorNote, StudentOutput, StudentStatus,
+    IterationRecord, LoopState, LoopStatus, MentorNote, StateLock, StudentOutput, StudentStatus,
+    STATE_VERSION,
 };
 pub use tutorial::{ImageFormat, Tutorial, TutorialImage, MAX_TUTORIAL_SIZE};
