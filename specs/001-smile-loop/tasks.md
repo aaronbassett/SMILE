@@ -102,10 +102,10 @@ Shared infrastructure required by all user stories.
 - [x] T032 [GIT] Commit: update codebase documents for phase 2
 - [x] T033 Review retro/P2.md and extract critical learnings to CLAUDE.md (conservative)
 - [x] T034 [GIT] Commit: finalize phase 2 retro
-- [ ] T035 [GIT] Push branch to origin (ensure pre-push hooks pass)
-- [ ] T036 [GIT] Create/update PR to main with phase summary
-- [ ] T037 [GIT] Verify all CI checks pass
-- [ ] T038 [GIT] Report PR ready status
+- [x] T035 [GIT] Push branch to origin (ensure pre-push hooks pass)
+- [x] T036 [GIT] Create/update PR to main with phase summary
+- [x] T037 [GIT] Verify all CI checks pass
+- [x] T038 [GIT] Report PR ready status
 
 ---
 
