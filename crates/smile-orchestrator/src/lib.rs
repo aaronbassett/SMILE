@@ -2,4 +2,6 @@
 //!
 //! Manages the Student-Mentor loop, HTTP API, and WebSocket events.
 
-// Module will be populated in Phase 2 (Foundational) and subsequent phases
+pub mod error;
+
+pub use error::{LlmErrorKind, Result, SmileError};
