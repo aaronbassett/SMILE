@@ -270,15 +270,35 @@ async fn run_smile_loop(args: Args) -> anyhow::Result<()> {
         }
     }
 
-    // Remove the container
-    tracing::info!(container_id = %container.id, "Removing container");
-    if let Err(e) = container_manager
-        .remove_container(&mut container, true)
-        .await
-    {
-        tracing::warn!(error = %e, "Failed to remove container");
+    // Determine whether to keep the container based on config
+    let loop_succeeded = loop_result.is_ok();
+    let keep_container = if loop_succeeded {
+        config.container.keep_on_success
+    } else {
+        config.container.keep_on_failure
+    };
+
+    if keep_container {
+        tracing::info!(
+            container_id = %container.id,
+            success = loop_succeeded,
+            "Keeping container for debugging"
+        );
+        println!(
+            "Container retained for debugging: {} (use `docker rm -f {}` to remove)",
+            container.id, container.id
+        );
+    } else {
+        // Remove the container
+        tracing::info!(container_id = %container.id, "Removing container");
+        if let Err(e) = container_manager
+            .remove_container(&mut container, true)
+            .await
+        {
+            tracing::warn!(error = %e, "Failed to remove container");
+        }
+        println!("Container removed");
     }
-    println!("Container removed");
 
     // Cancel the server
     server_handle.abort();
