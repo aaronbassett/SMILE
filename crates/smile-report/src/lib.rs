@@ -59,6 +59,8 @@ mod markdown;
 pub use markdown::MarkdownGenerator;
 
 use chrono::{DateTime, Utc};
+use once_cell::sync::Lazy;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -1006,6 +1008,28 @@ pub struct MentorNoteInput {
 }
 
 // ============================================================================
+// Static Regex Patterns
+// ============================================================================
+
+/// Pre-compiled regex patterns for extracting line numbers from step descriptions.
+///
+/// These patterns are lazily compiled on first use and reused for all subsequent calls,
+/// avoiding the overhead of recompiling regexes on every function call.
+static LINE_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
+    // These patterns are known to be valid, so unwrap is safe here
+    [
+        r"[Ll]ine\s*(\d+)", // "line 15", "Line 15"
+        r"[Ll](\d+)",       // "L42"
+        r"#L(\d+)",         // "#L42" (GitHub-style)
+        r"[Ss]tep\s*(\d+)", // "step 3"
+        r":(\d+)",          // ":42" (filename:line)
+    ]
+    .iter()
+    .filter_map(|pattern| Regex::new(pattern).ok())
+    .collect()
+});
+
+// ============================================================================
 // ReportGenerator
 // ============================================================================
 
@@ -1160,24 +1184,12 @@ impl ReportGenerator {
     ///
     /// Looks for line number patterns like "line 15", "L42", or "step 3"
     /// and extracts them into a `GapLocation`.
+    ///
+    /// Uses pre-compiled regex patterns from `LINE_PATTERNS` for better performance.
     fn extract_location(step: &str) -> GapLocation {
-        use regex::Regex;
-
         // Try to extract line numbers from patterns like "line 15", "L42", etc.
-        // Using once_cell would be better but we avoid it for MSRV compliance
-        let line_patterns = [
-            r"[Ll]ine\s*(\d+)", // "line 15", "Line 15"
-            r"[Ll](\d+)",       // "L42"
-            r"#L(\d+)",         // "#L42" (GitHub-style)
-            r"[Ss]tep\s*(\d+)", // "step 3"
-            r":(\d+)",          // ":42" (filename:line)
-        ];
-
-        for pattern in &line_patterns {
-            // Regex::new should not fail for these patterns, but we handle it gracefully
-            let Ok(re) = Regex::new(pattern) else {
-                continue;
-            };
+        // Uses lazily-compiled static patterns for performance
+        for re in LINE_PATTERNS.iter() {
             if let Some(caps) = re.captures(step) {
                 if let Some(num_match) = caps.get(1) {
                     if let Ok(line_num) = num_match.as_str().parse::<u32>() {
