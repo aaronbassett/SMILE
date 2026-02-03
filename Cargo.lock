@@ -1573,6 +1573,8 @@ dependencies = [
  "anyhow",
  "axum",
  "clap",
+ "serde",
+ "serde_json",
  "smile-container",
  "smile-orchestrator",
  "smile-report",
