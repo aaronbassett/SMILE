@@ -231,12 +231,12 @@ Shared infrastructure required by all user stories.
 - [x] T111 [US5] Implement structured output parsing with recovery in python/smile_wrappers/output.py (use devs:python-expert agent)
 - [x] T112 [GIT] Commit: add output parsing with recovery
 - [x] T113 [US5] Implement HTTP callback to orchestrator in python/smile_wrappers/student.py (use devs:python-expert agent)
-- [ ] T114 [GIT] Commit: add orchestrator callback
+- [x] T114 [GIT] Commit: add orchestrator callback
 
 ### Phase Completion
-- [ ] T115 [US5] Run /sdd:map incremental for Phase 6 changes
-- [ ] T116 [GIT] Commit: update codebase documents for phase 6
-- [ ] T117 [US5] Review retro/P6.md and extract critical learnings to CLAUDE.md (conservative)
+- [x] T115 [US5] Run /sdd:map incremental for Phase 6 changes (skipped - not configured)
+- [x] T116 [GIT] Commit: update codebase documents for phase 6 (skipped - not configured)
+- [x] T117 [US5] Review retro/P6.md and extract critical learnings to CLAUDE.md (conservative)
 - [ ] T118 [GIT] Commit: finalize phase 6 retro
 - [ ] T119 [GIT] Push branch to origin (ensure pre-push hooks pass)
 - [ ] T120 [GIT] Create/update PR to main with phase summary

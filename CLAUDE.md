@@ -109,8 +109,22 @@ Strict clippy configuration requires these patterns:
 7. **Test module allows**: Tests need `#[allow(clippy::unwrap_used)]` on `mod tests`. Also allow `expect_used` and `panic` if needed: `#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]`
 8. **Doc comment backticks**: Use backticks around method/type names in doc comments: `/// Test that \`start_container\` returns`
 
+## Ruff Patterns
+
+Strict ruff configuration enforces these limits:
+
+1. **Max return statements (PLR0911)**: Max 6 returns per function. Extract helper methods for complex logic.
+2. **Max branches (PLR0912)**: Max 12 branches per function. Use dictionary lookups instead of long match/if-elif chains.
+3. **Sorted `__all__`**: Run `ruff check --fix` to auto-sort `__all__` exports (RUF022).
+4. **Dictionary-based dispatch**: Replace match statements with dict lookups to reduce return count:
+   ```python
+   condition_map = {Condition.A: config.field_a, Condition.B: None}
+   return condition_map.get(condition) is None or condition_map.get(condition)
+   ```
+
 ## Recent Changes
 
+- 2026-02-03: Phase 6 complete - Student agent wrapper with LLM CLI invocation, stuck detection, output parsing
 - 2026-02-03: Phase 5 complete - container management via bollard (create, start, stop, remove, reset)
 - 2026-02-03: Phase 4 complete - tutorial loading, image extraction, CLI integration
 - 2026-02-03: Phase 3 complete - config loading, validation, CLI integration
