@@ -489,6 +489,7 @@ fn escape_markdown_inline_code(text: &str) -> String {
 }
 
 /// Truncates output to a maximum length, adding an ellipsis if needed.
+/// Uses character boundaries to avoid panics on multibyte UTF-8 characters.
 fn truncate_output(output: &str, max_length: usize) -> String {
     // Take only the first line to avoid table formatting issues
     let first_line = output.lines().next().unwrap_or("");
@@ -496,7 +497,13 @@ fn truncate_output(output: &str, max_length: usize) -> String {
     if first_line.len() <= max_length {
         first_line.to_string()
     } else {
-        format!("{}...", &first_line[..max_length])
+        // Find a valid char boundary at or before max_length
+        let truncate_at = first_line
+            .char_indices()
+            .take_while(|(idx, _)| *idx < max_length)
+            .last()
+            .map_or(0, |(idx, c)| idx + c.len_utf8());
+        format!("{}...", &first_line[..truncate_at])
     }
 }
 
@@ -709,6 +716,24 @@ mod tests {
     }
 
     #[test]
+    fn test_truncate_output_unicode() {
+        // Ensure multibyte UTF-8 characters don't cause panics
+        // Each Chinese character is 3 bytes
+        let chinese = "你好世界這是測試";
+        let result = truncate_output(chinese, 10);
+        // Should truncate at char boundary without panicking
+        assert!(result.ends_with("..."));
+        // Verify valid UTF-8 by iterating chars
+        assert!(result.chars().count() > 0);
+
+        // Test with emojis (4 bytes each)
+        let emojis = "🚀🎉🔥🌟✨";
+        let result = truncate_output(emojis, 10);
+        assert!(result.ends_with("..."));
+        assert!(result.chars().count() > 0);
+    }
+
+    #[test]
     fn test_empty_report() {
         let report = Report::default();
         let generator = MarkdownGenerator::new(&report);
@@ -787,5 +812,319 @@ mod tests {
         let minor = format_gap_count(1, "minor");
         assert!(minor.contains('1'));
         assert!(minor.contains("&#128993;"));
+    }
+
+    // ========================================================================
+    // Full Structure Validation Tests
+    // ========================================================================
+    //
+    // These tests verify the complete structure and content of generated
+    // markdown reports by comparing against expected output strings.
+    // Uses fixed timestamps for deterministic test results.
+
+    /// Creates a report with fixed timestamps for deterministic tests.
+    #[allow(clippy::too_many_lines)]
+    fn deterministic_sample_report() -> Report {
+        use chrono::TimeZone;
+
+        // Use fixed timestamps for deterministic output
+        let fixed_time = Utc.with_ymd_and_hms(2026, 1, 15, 10, 30, 0).unwrap();
+
+        Report {
+            tutorial_name: "getting-started.md".to_string(),
+            summary: ReportSummary {
+                status: ReportStatus::Completed,
+                iterations: 5,
+                duration_seconds: 332,
+                tutorial_path: "/tutorials/getting-started.md".to_string(),
+            },
+            gaps: vec![
+                Gap {
+                    id: 1,
+                    title: "Missing package.json".to_string(),
+                    location: GapLocation::at_line_with_quote(15, "Run npm install"),
+                    problem:
+                        "The tutorial instructs to run npm install but package.json is not provided"
+                            .to_string(),
+                    suggested_fix: "Add package.json contents before the install step".to_string(),
+                    severity: GapSeverity::Critical,
+                },
+                Gap {
+                    id: 2,
+                    title: "Unclear environment variable".to_string(),
+                    location: GapLocation::at_line(42),
+                    problem: "DATABASE_URL is referenced but not explained".to_string(),
+                    suggested_fix: "Add a section explaining required environment variables"
+                        .to_string(),
+                    severity: GapSeverity::Major,
+                },
+                Gap {
+                    id: 3,
+                    title: "Typo in command".to_string(),
+                    location: GapLocation::with_quote("npm rn dev"),
+                    problem: "Command has a typo".to_string(),
+                    suggested_fix: "Change 'npm rn dev' to 'npm run dev'".to_string(),
+                    severity: GapSeverity::Minor,
+                },
+            ],
+            timeline: vec![
+                TimelineEntry {
+                    timestamp: fixed_time,
+                    iteration: 1,
+                    event: "Student started".to_string(),
+                    details: Some("Beginning tutorial".to_string()),
+                },
+                TimelineEntry {
+                    timestamp: fixed_time + chrono::Duration::seconds(60),
+                    iteration: 2,
+                    event: "Mentor consulted".to_string(),
+                    details: None,
+                },
+            ],
+            audit_trail: AuditTrail {
+                commands: vec![
+                    AuditCommand {
+                        command: "npm install".to_string(),
+                        exit_code: 1,
+                        output: "npm ERR! missing package.json".to_string(),
+                        timestamp: fixed_time + chrono::Duration::seconds(10),
+                    },
+                    AuditCommand {
+                        command: "npm run dev".to_string(),
+                        exit_code: 0,
+                        output: "Server started on port 3000".to_string(),
+                        timestamp: fixed_time + chrono::Duration::seconds(120),
+                    },
+                ],
+                files: vec![
+                    AuditFile {
+                        path: "package.json".to_string(),
+                        operation: crate::FileOperation::Created,
+                        timestamp: fixed_time + chrono::Duration::seconds(30),
+                    },
+                    AuditFile {
+                        path: "src/index.js".to_string(),
+                        operation: crate::FileOperation::Modified,
+                        timestamp: fixed_time + chrono::Duration::seconds(90),
+                    },
+                ],
+                llm_calls: vec![
+                    AuditLlmCall {
+                        provider: "claude".to_string(),
+                        prompt_tokens: 1500,
+                        completion_tokens: 500,
+                        duration_ms: 2500,
+                        timestamp: fixed_time + chrono::Duration::seconds(5),
+                    },
+                    AuditLlmCall {
+                        provider: "claude".to_string(),
+                        prompt_tokens: 800,
+                        completion_tokens: 200,
+                        duration_ms: 1200,
+                        timestamp: fixed_time + chrono::Duration::seconds(65),
+                    },
+                ],
+            },
+            recommendations: vec![
+                Recommendation::new(
+                    1,
+                    "completeness",
+                    "Add all prerequisite files to the tutorial",
+                ),
+                Recommendation::new(
+                    2,
+                    "clarity",
+                    "Explain environment variables in a dedicated section",
+                ),
+            ],
+        }
+    }
+
+    /// Generates markdown without the footer (which has dynamic timestamp).
+    fn generate_without_footer(report: &Report) -> String {
+        let generator = MarkdownGenerator::new(report);
+        let mut output = String::new();
+
+        generator.write_title(&mut output);
+        generator.write_summary(&mut output);
+        generator.write_gaps(&mut output);
+        generator.write_timeline(&mut output);
+        generator.write_audit_trail(&mut output);
+        generator.write_recommendations(&mut output);
+
+        output
+    }
+
+    /// Validates the full report structure by checking all expected sections and content.
+    #[test]
+    fn test_full_report_structure() {
+        let report = deterministic_sample_report();
+        let markdown = generate_without_footer(&report);
+
+        // Verify title
+        assert!(markdown.contains("# SMILE Validation Report: getting-started.md\n"));
+
+        // Verify summary table structure and values
+        assert!(markdown.contains("## Summary\n"));
+        assert!(markdown.contains("| Metric | Value |"));
+        assert!(markdown.contains("| Status | Tutorial completed successfully |"));
+        assert!(markdown.contains("| Iterations | 5 |"));
+        assert!(markdown.contains("| Duration | 5m 32s |"));
+        assert!(markdown.contains("| Tutorial | /tutorials/getting-started.md |"));
+        assert!(markdown.contains("| Gaps Found | 3 ("));
+
+        // Verify gap sections exist with correct headers
+        assert!(markdown.contains("## Documentation Gaps\n"));
+        assert!(markdown.contains("### &#128308; Critical Gaps\n"));
+        assert!(markdown.contains("### &#128992; Major Gaps\n"));
+        assert!(markdown.contains("### &#128993; Minor Gaps\n"));
+
+        // Verify all three gaps are present with correct details
+        assert!(markdown.contains("#### Gap #1: Missing package.json\n"));
+        assert!(markdown.contains("**Location**: Line 15 | `Run npm install`"));
+        assert!(markdown
+            .contains("**Problem**: The tutorial instructs to run npm install but package.json"));
+        assert!(
+            markdown.contains("**Suggested Fix**: Add package.json contents before the install")
+        );
+
+        assert!(markdown.contains("#### Gap #2: Unclear environment variable\n"));
+        assert!(markdown.contains("**Location**: Line 42\n"));
+        assert!(markdown.contains("**Problem**: DATABASE\\_URL is referenced but not explained"));
+
+        assert!(markdown.contains("#### Gap #3: Typo in command\n"));
+        assert!(markdown.contains("**Location**: `npm rn dev`"));
+        assert!(markdown.contains("**Problem**: Command has a typo"));
+
+        // Verify timeline
+        assert!(markdown.contains("## Timeline\n"));
+        assert!(markdown.contains("| Time | Iteration | Event | Details |"));
+        assert!(markdown.contains("2026-01-15 10:30:00 UTC"));
+        assert!(markdown.contains("#1 | Student started | Beginning tutorial"));
+        assert!(markdown.contains("2026-01-15 10:31:00 UTC"));
+        assert!(markdown.contains("#2 | Mentor consulted"));
+
+        // Verify audit trail sections
+        assert!(markdown.contains("## Audit Trail\n"));
+        assert!(markdown.contains("### Commands Executed\n"));
+        assert!(markdown.contains("| Time | Command | Exit | Output |"));
+        assert!(markdown.contains("`npm install`"));
+        assert!(markdown.contains("| 1 |"));
+        assert!(markdown.contains("`npm run dev`"));
+        assert!(markdown.contains("| 0 |"));
+
+        assert!(markdown.contains("### Files Modified\n"));
+        assert!(markdown.contains("| Time | Operation | Path |"));
+        assert!(markdown.contains("| created | package.json |"));
+        assert!(markdown.contains("| modified | src/index.js |"));
+
+        assert!(markdown.contains("### LLM Calls\n"));
+        assert!(markdown.contains("| Time | Provider | Tokens | Duration |"));
+        assert!(markdown.contains("| claude | 1500+500 | 2500ms |"));
+        assert!(markdown.contains("| claude | 800+200 | 1200ms |"));
+
+        // Verify recommendations
+        assert!(markdown.contains("## Recommendations\n"));
+        assert!(markdown.contains("1. **[completeness]** Add all prerequisite files"));
+        assert!(markdown.contains("2. **[clarity]** Explain environment variables"));
+    }
+
+    /// Validates empty report shows appropriate placeholder messages.
+    #[test]
+    fn test_empty_report_structure() {
+        let report = Report::default();
+        let markdown = generate_without_footer(&report);
+
+        // Empty report should have placeholders for empty sections
+        assert!(markdown.contains("*No documentation gaps identified.*"));
+        assert!(markdown.contains("*No timeline events recorded.*"));
+        assert!(markdown.contains("*No commands executed.*"));
+        assert!(markdown.contains("*No files modified.*"));
+        assert!(markdown.contains("*No LLM calls made.*"));
+        assert!(markdown.contains("*No specific recommendations.*"));
+
+        // Summary should show zeros
+        assert!(markdown.contains("| Iterations | 0 |"));
+        assert!(markdown.contains("| Duration | 0s |"));
+        assert!(markdown.contains("Gaps Found | 0"));
+    }
+
+    /// Validates critical-only gap report structure.
+    #[test]
+    fn test_critical_gaps_only_structure() {
+        use chrono::TimeZone;
+        let fixed_time = Utc.with_ymd_and_hms(2026, 1, 15, 10, 30, 0).unwrap();
+
+        let report = Report {
+            tutorial_name: "broken-tutorial.md".to_string(),
+            summary: ReportSummary {
+                status: ReportStatus::Blocker,
+                iterations: 1,
+                duration_seconds: 45,
+                tutorial_path: "/tutorials/broken-tutorial.md".to_string(),
+            },
+            gaps: vec![
+                Gap {
+                    id: 1,
+                    title: "Missing Docker prerequisite".to_string(),
+                    location: GapLocation::at_line(5),
+                    problem: "Docker is not installed but the tutorial requires Docker commands"
+                        .to_string(),
+                    suggested_fix: "Add Docker installation instructions as a prerequisite"
+                        .to_string(),
+                    severity: GapSeverity::Critical,
+                },
+                Gap {
+                    id: 2,
+                    title: "Invalid configuration file".to_string(),
+                    location: GapLocation::with_quote("config.yaml"),
+                    problem: "The config.yaml file referenced does not exist".to_string(),
+                    suggested_fix: "Provide the complete config.yaml file contents".to_string(),
+                    severity: GapSeverity::Critical,
+                },
+            ],
+            timeline: vec![TimelineEntry {
+                timestamp: fixed_time,
+                iteration: 1,
+                event: "Blocker encountered".to_string(),
+                details: Some("Cannot proceed without Docker".to_string()),
+            }],
+            audit_trail: AuditTrail::default(),
+            recommendations: vec![Recommendation::new(
+                1,
+                "prerequisites",
+                "Verify all prerequisites are clearly documented at the start of the tutorial",
+            )],
+        };
+
+        let markdown = generate_without_footer(&report);
+
+        // Should show blocker status
+        assert!(markdown.contains("| Status | Unresolvable blocker encountered |"));
+        assert!(markdown.contains("| Iterations | 1 |"));
+
+        // Should have 2 critical gaps
+        assert!(markdown.contains("Gaps Found | 2 (&#128308; 2 critical"));
+
+        // Critical section should have both gaps
+        assert!(markdown.contains("### &#128308; Critical Gaps\n"));
+        assert!(markdown.contains("#### Gap #1: Missing Docker prerequisite"));
+        assert!(markdown.contains("#### Gap #2: Invalid configuration file"));
+
+        // Major and Minor sections should show "None"
+        assert!(markdown.contains("### &#128992; Major Gaps\n\n*None*"));
+        assert!(markdown.contains("### &#128993; Minor Gaps\n\n*None*"));
+
+        // Timeline should have the blocker event
+        assert!(markdown.contains("Blocker encountered"));
+        assert!(markdown.contains("Cannot proceed without Docker"));
+
+        // Empty audit trail sections
+        assert!(markdown.contains("*No commands executed.*"));
+        assert!(markdown.contains("*No files modified.*"));
+        assert!(markdown.contains("*No LLM calls made.*"));
+
+        // Recommendations
+        assert!(markdown.contains("**[prerequisites]**"));
     }
 }

@@ -1,0 +1,175 @@
+name: Alpha Feedback
+description: Share feedback, observations, or validation results from testing SMILE Loop
+labels: ["feedback", "alpha"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing SMILE Loop alpha! Your feedback is crucial for improving the validation system.
+        This template is for general feedback, observations, and validation testing results.
+
+  - type: dropdown
+    id: feedback_type
+    attributes:
+      label: Feedback Type
+      description: What kind of feedback are you providing?
+      options:
+        - User experience / workflow
+        - Tutorial validation accuracy
+        - Agent behavior (Student/Mentor)
+        - Report quality or clarity
+        - Performance or resource usage
+        - Documentation or examples
+        - Setup and installation
+        - Feature gap or limitation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: feedback
+    attributes:
+      label: Your Feedback
+      description: |
+        Share your observations, suggestions, or concerns.
+        What's working well? What could be improved?
+      placeholder: |
+        I tested SMILE Loop on a Node.js tutorial and noticed...
+        The Student agent successfully followed 80% of the steps but got confused when...
+        The report was very helpful because it highlighted...
+        One issue: the validation took longer than expected because...
+    validations:
+      required: true
+
+  - type: textarea
+    id: tutorial_info
+    attributes:
+      label: Tutorial Information
+      description: |
+        Tell us about the tutorial you tested.
+        This helps us understand the validation context.
+      placeholder: |
+        - Tutorial: Node.js REST API setup (20 steps)
+        - Topics: Express, Database, Authentication
+        - Estimated user level: Intermediate
+        - Tutorial length: ~30 minutes
+        - Any images/videos: Yes, 3 code screenshots
+
+  - type: textarea
+    id: validation_results
+    attributes:
+      label: Validation Results
+      description: |
+        What did SMILE Loop find? What gaps or issues were discovered?
+      placeholder: |
+        - Student got stuck on database connection step
+        - Mentor provided helpful context about connection strings
+        - Agent didn't understand custom error messages
+        - Overall assessment: Tutorial is clear but needs one more setup detail
+
+  - type: textarea
+    id: agent_observations
+    attributes:
+      label: Agent Behavior Observations
+      description: |
+        How did the Student and Mentor agents behave?
+        Did they interact as expected?
+      placeholder: |
+        - Student agent: Good at following explicit steps, struggled with implicit setup
+        - Mentor agent: Helpful hints but sometimes too technical
+        - Loop iterations: Escalated 3 times before completing
+        - Accuracy: ~85% of tutorial validated successfully
+
+  - type: textarea
+    id: improvements
+    attributes:
+      label: Suggested Improvements
+      description: What could SMILE Loop do better?
+      placeholder: |
+        1. Student agent could better handle prerequisites
+        2. Mentor could provide more beginner-friendly guidance
+        3. Report could include step-by-step analysis
+        4. Configuration options for different tutorial complexity levels
+
+  - type: dropdown
+    id: ease_of_use
+    attributes:
+      label: Ease of Use
+      description: How easy was SMILE Loop to set up and use?
+      options:
+        - Very difficult (setup took significant troubleshooting)
+        - Difficult (required some help/research)
+        - Moderate (worked with minor issues)
+        - Easy (straightforward process)
+        - Very easy (worked perfectly on first try)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: report_quality
+    attributes:
+      label: Report Quality
+      description: How useful was the generated validation report?
+      options:
+        - Not useful (unclear or missing information)
+        - Minimally useful (some relevant information)
+        - Moderately useful (helpful but incomplete)
+        - Very useful (clear insights into gaps)
+        - Excellent (exactly what I needed)
+
+  - type: textarea
+    id: report_feedback
+    attributes:
+      label: Report Feedback
+      description: Any suggestions for improving the validation report?
+      placeholder: |
+        - The report clearly showed where Student got stuck
+        - Would be helpful to include retry counts per step
+        - Suggestion: add confidence scores for detected gaps
+        - Could include recommendations for tutorial fixes
+
+  - type: textarea
+    id: system_info
+    attributes:
+      label: System Information
+      description: |
+        Basic environment info (helps us identify platform-specific issues)
+      placeholder: |
+        - OS: macOS 14.2 (Apple Silicon)
+        - Rust: 1.75.0
+        - Python: 3.11.6
+        - Docker: 24.0.7
+        - LLM: claude (v0.5.2)
+
+  - type: checkboxes
+    id: testing_scope
+    attributes:
+      label: Testing Scope
+      description: What aspects did you test?
+      options:
+        - label: CLI execution and basic workflow
+        - label: Agent behavior and interactions
+        - label: Report generation and accuracy
+        - label: Multiple LLM providers
+        - label: Different tutorial types
+        - label: Error handling and recovery
+        - label: Performance and resource usage
+        - label: Configuration options
+
+  - type: textarea
+    id: follow_up
+    attributes:
+      label: Follow-up Questions or Context
+      description: Anything else you'd like to share?
+      placeholder: |
+        I'm planning to use this for validating technical documentation.
+        Would be interested in discussing use cases with the team.
+
+  - type: checkboxes
+    id: contact
+    attributes:
+      label: Contact
+      options:
+        - label: I'm happy to provide more details or testing
+        - label: I'm interested in collaborating on validation scenarios
+        - label: Feel free to reach out with follow-up questions

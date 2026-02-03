@@ -5,9 +5,32 @@
 
 use std::path::{Path, PathBuf};
 
+use once_cell::sync::Lazy;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, SmileError};
+
+/// Regex pattern for extracting markdown image references.
+///
+/// Matches markdown image syntax: `![alt text](path)` and `![](path)`
+/// Captures the path portion in group 1.
+///
+/// Pattern explanation:
+/// - `!\[` - literal "!["
+/// - `[^\]]*` - any chars except "]" (alt text)
+/// - `\]\(` - literal "]("
+/// - `([^)\s]+)` - capture group: path (no parens or whitespace)
+/// - `(?:\s+[^)]*)?` - optional title after whitespace
+/// - `\)` - closing paren
+///
+/// # Panics
+///
+/// Panics at initialization if the regex pattern is invalid. This is a compile-time
+/// constant pattern that has been verified to be correct.
+#[allow(clippy::expect_used)] // Pattern is a compile-time constant; panic at init is acceptable
+static IMAGE_REGEX: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"!\[[^\]]*\]\(([^)\s]+)(?:\s+[^)]*)?\)").expect("valid regex"));
 
 /// Maximum allowed tutorial file size in bytes (100KB).
 pub const MAX_TUTORIAL_SIZE: u64 = 100 * 1024;
@@ -207,18 +230,38 @@ impl Tutorial {
             // Resolve the path relative to the tutorial directory
             let resolved_path = base_dir.join(&reference);
 
+            // Canonicalize paths to prevent path traversal attacks
+            // (e.g., ../../../etc/passwd in untrusted tutorials)
+            let Ok(canonical_path) = std::fs::canonicalize(&resolved_path) else {
+                continue; // Skip non-existent paths
+            };
+            let Ok(canonical_base) = std::fs::canonicalize(&base_dir) else {
+                continue; // Skip if base directory doesn't exist
+            };
+
+            // Ensure the resolved path is within the tutorial directory
+            if !canonical_path.starts_with(&canonical_base) {
+                tracing::warn!(
+                    reference = %reference,
+                    resolved = %canonical_path.display(),
+                    base = %canonical_base.display(),
+                    "Image reference escapes tutorial directory, skipping"
+                );
+                continue;
+            }
+
             // Check if it's a supported format
-            let Some(format) = ImageFormat::from_path(&resolved_path) else {
+            let Some(format) = ImageFormat::from_path(&canonical_path) else {
                 continue; // Skip unsupported formats
             };
 
-            // Try to load the image data
-            let Ok(data) = std::fs::read(&resolved_path) else {
-                continue; // Skip missing images
+            // Load the image data (safe now that we've validated the path)
+            let Ok(data) = std::fs::read(&canonical_path) else {
+                continue; // Skip unreadable images
             };
 
-            // Canonicalize the path for consistent representation
-            let resolved_path = std::fs::canonicalize(&resolved_path).unwrap_or(resolved_path);
+            // Use the canonical path for consistent representation
+            let resolved_path = canonical_path;
 
             images.push(TutorialImage {
                 reference,
@@ -251,22 +294,8 @@ impl Tutorial {
 /// Parses markdown image syntax: `![alt text](path)` and `![](path)`
 /// Returns a vector of the path strings (not including alt text).
 fn extract_image_references(content: &str) -> Vec<String> {
-    use regex::Regex;
-
-    // Regex to match markdown image syntax: ![alt](path)
-    // Captures the path portion in group 1
-    // Pattern explanation:
-    // - `!\[` - literal "!["
-    // - `[^\]]*` - any chars except "]" (alt text)
-    // - `\]\(` - literal "]("
-    // - `([^)\s]+)` - capture group: path (no parens or whitespace)
-    // - `(?:\s+[^)]*)?` - optional title after whitespace
-    // - `\)` - closing paren
-    let Ok(re) = Regex::new(r"!\[[^\]]*\]\(([^)\s]+)(?:\s+[^)]*)?\)") else {
-        return Vec::new();
-    };
-
-    re.captures_iter(content)
+    IMAGE_REGEX
+        .captures_iter(content)
         .filter_map(|cap| cap.get(1).map(|m| m.as_str().to_string()))
         .collect()
 }
@@ -660,5 +689,51 @@ And another:
 
         // Cleanup
         std::fs::remove_dir_all(&temp_dir).ok();
+    }
+
+    #[test]
+    fn test_extract_images_path_traversal_blocked() {
+        use std::io::Write;
+
+        // Create two directories: one for the tutorial and one outside as "secret"
+        let temp_base = std::env::temp_dir().join("smile_test_traversal");
+        let tutorial_dir = temp_base.join("tutorial_dir");
+        let secret_dir = temp_base.join("secret_dir");
+        std::fs::create_dir_all(&tutorial_dir).unwrap();
+        std::fs::create_dir_all(&secret_dir).unwrap();
+
+        // Create a "secret" file outside the tutorial directory
+        let secret_path = secret_dir.join("secret.png");
+        std::fs::write(&secret_path, [0x89, 0x50, 0x4E, 0x47]).unwrap();
+
+        // Create a legitimate image inside the tutorial directory
+        let safe_path = tutorial_dir.join("safe.png");
+        std::fs::write(&safe_path, [0x89, 0x50, 0x4E, 0x47]).unwrap();
+
+        // Create a tutorial that tries to load an image via path traversal
+        let tutorial_path = tutorial_dir.join("tutorial.md");
+        let content = r"
+# Malicious Tutorial
+
+![Secret](../secret_dir/secret.png)
+![Safe](safe.png)
+";
+        let mut file = std::fs::File::create(&tutorial_path).unwrap();
+        file.write_all(content.as_bytes()).unwrap();
+
+        // Load tutorial with images
+        let tutorial = Tutorial::load_with_images(&tutorial_path).unwrap();
+
+        // Should only have 1 image - the safe one
+        // The path traversal attempt should be blocked
+        assert_eq!(
+            tutorial.images.len(),
+            1,
+            "Path traversal image should be blocked, only safe image should load"
+        );
+        assert_eq!(tutorial.images[0].reference, "safe.png");
+
+        // Cleanup
+        std::fs::remove_dir_all(&temp_base).ok();
     }
 }

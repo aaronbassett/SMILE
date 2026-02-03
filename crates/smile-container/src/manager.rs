@@ -10,13 +10,15 @@ use bollard::container::CreateContainerOptions as BollardCreateOptions;
 use bollard::container::RemoveContainerOptions;
 use bollard::container::StartContainerOptions;
 use bollard::container::StopContainerOptions;
+use bollard::exec::{CreateExecOptions, StartExecResults};
 use bollard::models::HostConfig;
 use bollard::models::Mount as BollardMount;
 use bollard::models::MountTypeEnum;
 use bollard::Docker;
+use futures::StreamExt;
 use tracing::{debug, info, instrument, warn};
 
-use crate::{Container, ContainerError, ContainerStatus, Mount};
+use crate::{Container, ContainerError, ContainerStatus, ExecOutput, Mount};
 
 /// Options for creating a new Docker container.
 ///
@@ -719,6 +721,118 @@ impl ContainerManager {
 
         debug!(container_id = %container_id, status = %status, "Container status retrieved");
         Ok(status)
+    }
+
+    /// Executes a command inside a running container.
+    ///
+    /// This method creates an exec instance, runs the command, and captures
+    /// the output. The command runs in the container's default working directory.
+    ///
+    /// # Arguments
+    ///
+    /// * `container` - The container to execute the command in
+    /// * `cmd` - The command and arguments to execute
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ContainerError::InvalidState`] if the container is not running.
+    ///
+    /// Returns [`ContainerError::ExecFailed`] if the Docker API returns an error
+    /// during exec creation or execution.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use smile_container::{ContainerManager, Container, ContainerStatus};
+    ///
+    /// # async fn example() -> Result<(), smile_container::ContainerError> {
+    /// let manager = ContainerManager::new()?;
+    ///
+    /// // Assuming we have a running container
+    /// let container = Container::new("abc123", "my-container", "alpine:latest")
+    ///     .with_status(ContainerStatus::Running);
+    ///
+    /// let output = manager.exec_in_container(&container, vec!["echo", "hello"]).await?;
+    /// println!("Output: {}", output.output);
+    /// println!("Exit code: {}", output.exit_code);
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[instrument(skip(self, container), fields(container_id = %container.id, cmd = ?cmd))]
+    pub async fn exec_in_container(
+        &self,
+        container: &Container,
+        cmd: Vec<&str>,
+    ) -> Result<ExecOutput, ContainerError> {
+        if !container.is_running() {
+            return Err(ContainerError::InvalidState {
+                expected: ContainerStatus::Running,
+                actual: container.status,
+            });
+        }
+
+        debug!("Creating exec instance");
+
+        let exec_config = CreateExecOptions {
+            attach_stdout: Some(true),
+            attach_stderr: Some(true),
+            cmd: Some(cmd.iter().map(|s| (*s).to_string()).collect()),
+            ..Default::default()
+        };
+
+        let exec = self
+            .docker
+            .create_exec(&container.id, exec_config)
+            .await
+            .map_err(|e| ContainerError::ExecFailed(format!("Failed to create exec: {e}")))?;
+
+        debug!(exec_id = %exec.id, "Starting exec");
+
+        let start_result = self
+            .docker
+            .start_exec(&exec.id, None)
+            .await
+            .map_err(|e| ContainerError::ExecFailed(format!("Failed to start exec: {e}")))?;
+
+        // Collect the output from the stream
+        let mut output = String::new();
+        if let StartExecResults::Attached {
+            output: mut stream, ..
+        } = start_result
+        {
+            while let Some(result) = stream.next().await {
+                match result {
+                    Ok(log) => {
+                        use bollard::container::LogOutput;
+                        let text = match log {
+                            LogOutput::StdOut { message }
+                            | LogOutput::StdErr { message }
+                            | LogOutput::StdIn { message }
+                            | LogOutput::Console { message } => {
+                                String::from_utf8_lossy(&message).to_string()
+                            }
+                        };
+                        output.push_str(&text);
+                    }
+                    Err(e) => {
+                        return Err(ContainerError::ExecFailed(format!("Stream error: {e}")));
+                    }
+                }
+            }
+        }
+
+        // Get the exit code by inspecting the exec
+        let inspect = self
+            .docker
+            .inspect_exec(&exec.id)
+            .await
+            .map_err(|e| ContainerError::ExecFailed(format!("Failed to inspect exec: {e}")))?;
+
+        let exit_code = inspect.exit_code.unwrap_or(-1);
+
+        debug!(exit_code = exit_code, "Exec completed");
+
+        Ok(ExecOutput::new(output, exit_code))
     }
 }
 

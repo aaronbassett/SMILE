@@ -571,14 +571,14 @@ impl LoopState {
     /// assert!(!state.check_max_iterations(10)); // iteration = 0
     ///
     /// state.iteration = 10;
-    /// assert!(state.check_max_iterations(10)); // at limit
+    /// assert!(!state.check_max_iterations(10)); // at limit, still running
     ///
     /// state.iteration = 11;
     /// assert!(state.check_max_iterations(10)); // over limit
     /// ```
     #[must_use]
     pub const fn check_max_iterations(&self, max_iterations: u32) -> bool {
-        self.iteration >= max_iterations
+        self.iteration > max_iterations
     }
 
     /// Check all termination conditions and transition state if needed.
@@ -610,8 +610,12 @@ impl LoopState {
     /// // Fresh state, no termination
     /// assert!(state.check_termination(10, 3600).is_none());
     ///
-    /// // Simulate being at max iterations
+    /// // At max iterations - still running, not over yet
     /// state.iteration = 10;
+    /// assert!(state.check_termination(10, 3600).is_none());
+    ///
+    /// // Over max iterations - terminates
+    /// state.iteration = 11;
     /// let result = state.check_termination(10, 3600);
     /// assert_eq!(result, Some(LoopStatus::MaxIterations));
     /// assert_eq!(state.status, LoopStatus::MaxIterations);
@@ -2629,12 +2633,12 @@ mod tests {
     #[test]
     fn test_check_max_iterations_not_reached() {
         let mut state = LoopState::new();
-        assert!(!state.check_max_iterations(1)); // 0 < 1
-        assert!(!state.check_max_iterations(10)); // 0 < 10
+        assert!(!state.check_max_iterations(1)); // 0 not > 1
+        assert!(!state.check_max_iterations(10)); // 0 not > 10
 
         state.iteration = 5;
-        assert!(!state.check_max_iterations(10)); // 5 < 10
-        assert!(!state.check_max_iterations(6)); // 5 < 6
+        assert!(!state.check_max_iterations(10)); // 5 not > 10
+        assert!(!state.check_max_iterations(5)); // 5 not > 5 (at boundary, still running)
     }
 
     #[test]
@@ -2642,8 +2646,8 @@ mod tests {
         let mut state = LoopState::new();
 
         state.iteration = 10;
-        assert!(state.check_max_iterations(10)); // 10 >= 10 (at boundary)
-        assert!(!state.check_max_iterations(11)); // 10 < 11
+        assert!(!state.check_max_iterations(10)); // 10 not > 10 (at boundary, still running)
+        assert!(!state.check_max_iterations(11)); // 10 not > 11
     }
 
     #[test]
@@ -2651,9 +2655,9 @@ mod tests {
         let mut state = LoopState::new();
         state.iteration = 15;
 
-        assert!(state.check_max_iterations(10)); // 15 >= 10
-        assert!(state.check_max_iterations(15)); // 15 >= 15
-        assert!(!state.check_max_iterations(16)); // 15 < 16
+        assert!(state.check_max_iterations(10)); // 15 > 10
+        assert!(state.check_max_iterations(14)); // 15 > 14
+        assert!(!state.check_max_iterations(15)); // 15 not > 15 (at boundary)
     }
 
     #[test]
@@ -2693,7 +2697,7 @@ mod tests {
     fn test_check_termination_triggers_max_iterations() {
         let mut state = LoopState::new();
         state.start().unwrap();
-        state.iteration = 10;
+        state.iteration = 11; // Over max of 10
 
         let result = state.check_termination(10, 3600);
         assert_eq!(result, Some(LoopStatus::MaxIterations));
@@ -2706,8 +2710,8 @@ mod tests {
 
         let mut state = LoopState::new();
         state.start().unwrap();
-        state.iteration = 10;
-        // Set started_at to 100 seconds ago
+        state.iteration = 11; // Over max of 10
+                              // Set started_at to 100 seconds ago
         state.started_at = Utc::now() - Duration::seconds(100);
 
         // Both conditions met, but timeout should be checked first
@@ -2723,7 +2727,7 @@ mod tests {
         let original_updated_at = state.updated_at;
 
         std::thread::sleep(std::time::Duration::from_millis(10));
-        state.iteration = 10;
+        state.iteration = 11; // Over max of 10
         state.check_termination(10, 3600);
 
         assert!(state.updated_at > original_updated_at);

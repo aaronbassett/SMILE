@@ -1,0 +1,194 @@
+name: Bug Report
+description: Report a validation failure, agent behavior issue, or technical problem
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug! Please provide detailed information to help us diagnose and fix the issue.
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Bug Category
+      description: What area is affected?
+      options:
+        - Student Agent (validation execution)
+        - Mentor Agent (guidance/hints)
+        - Orchestrator (loop management, state)
+        - Container (Docker, environment)
+        - Report Generation (markdown/JSON output)
+        - LLM CLI Integration (claude/codex/gemini)
+        - Configuration (smile.json)
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the bug clearly and concisely.
+      placeholder: |
+        The Student agent failed to complete step 3 of the tutorial...
+    validations:
+      required: true
+
+  - type: textarea
+    id: tutorial
+    attributes:
+      label: Tutorial Content
+      description: |
+        Paste the tutorial markdown (or attach as file if large).
+        Please include only the relevant section that causes the issue.
+      placeholder: |
+        # Installation
+
+        Run `npm install` to install dependencies.
+      render: markdown
+    validations:
+      required: false
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Exact steps to reproduce the issue
+      placeholder: |
+        1. Create smile.json with default config
+        2. Run `cargo run -p smile-cli -- tutorial.md`
+        3. Observe Student agent getting stuck at step X
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What should have happened?
+      placeholder: Student should have successfully completed step X and asked for help when confused.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened?
+      placeholder: Student agent exited with error or got stuck in a loop.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error Output / Logs
+      description: |
+        Paste error messages, stack traces, container logs, or LLM responses.
+        Run with `RUST_LOG=debug cargo run -p smile-cli -- tutorial.md` for verbose output.
+      placeholder: |
+        thread 'main' panicked at 'Failed to start container'
+        ...stack trace...
+      render: shell
+
+  - type: textarea
+    id: container_logs
+    attributes:
+      label: Container Logs
+      description: |
+        If applicable, paste logs from the Student/Mentor container.
+        Run: `docker logs <container_id>`
+      placeholder: |
+        Student wrapper initialized
+        Executing step: npm install
+        ...
+      render: shell
+
+  - type: dropdown
+    id: lvm-provider
+    attributes:
+      label: LLM Provider
+      description: Which LLM CLI are you using?
+      options:
+        - claude (Claude)
+        - codex (GitHub Copilot)
+        - gemini (Google Gemini)
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: lvm-version
+    attributes:
+      label: LLM CLI Version
+      description: Version of the LLM CLI tool (e.g., from `claude --version`)
+      placeholder: "@anthropic-ai/cli 0.5.2"
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration
+      description: Your smile.json configuration (redact sensitive values)
+      placeholder: |
+        {
+          "tutorial": "tutorial.md",
+          "llmProvider": "claude",
+          "maxIterations": 10,
+          "timeout": 1800
+        }
+      render: json
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      options:
+        - macOS (Intel)
+        - macOS (Apple Silicon)
+        - Linux (Ubuntu/Debian)
+        - Linux (RHEL/CentOS)
+        - Linux (Alpine/Container)
+        - Windows (WSL2)
+        - Windows (native)
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: rust-version
+    attributes:
+      label: Rust Version
+      description: Output of `rustc --version`
+      placeholder: "rustc 1.75.0 (1d8b05fc5 2023-12-21)"
+    validations:
+      required: true
+
+  - type: input
+    id: docker-version
+    attributes:
+      label: Docker Version
+      description: Output of `docker --version`
+      placeholder: "Docker version 24.0.0, build 2391953"
+    validations:
+      required: true
+
+  - type: input
+    id: python-version
+    attributes:
+      label: Python Version
+      description: Output of `python --version`
+      placeholder: "Python 3.11.0"
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I have checked existing issues for duplicates
+          required: true
+        - label: I have provided a minimal reproducible example
+          required: true
+        - label: I have included relevant logs and error messages
+          required: false
+        - label: I am using the latest version from main branch
+          required: true

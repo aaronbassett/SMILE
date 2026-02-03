@@ -9,10 +9,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use clap::Parser;
+use serde::Serialize;
 use smile_container::{ContainerManager, CreateContainerOptions, Mount};
 use smile_orchestrator::{
     create_router, AppState, Config, EventBroadcaster, IterationRecord, LoopState, LoopStatus,
-    MentorNote, StateLock, StudentStatus, Tutorial,
+    MentorNote, StateLock, StudentOutput, StudentStatus, Tutorial,
 };
 use smile_report::{
     json::JsonGenerator, IterationInput, MarkdownGenerator, MentorNoteInput, ReportGenerator,
@@ -250,7 +251,7 @@ async fn run_smile_loop(args: Args) -> anyhow::Result<()> {
         &state_path,
         &config,
         &container_manager,
-        &mut container,
+        &container,
     )
     .await;
 
@@ -269,15 +270,35 @@ async fn run_smile_loop(args: Args) -> anyhow::Result<()> {
         }
     }
 
-    // Remove the container
-    tracing::info!(container_id = %container.id, "Removing container");
-    if let Err(e) = container_manager
-        .remove_container(&mut container, true)
-        .await
-    {
-        tracing::warn!(error = %e, "Failed to remove container");
+    // Determine whether to keep the container based on config
+    let loop_succeeded = loop_result.is_ok();
+    let keep_container = if loop_succeeded {
+        config.container.keep_on_success
+    } else {
+        config.container.keep_on_failure
+    };
+
+    if keep_container {
+        tracing::info!(
+            container_id = %container.id,
+            success = loop_succeeded,
+            "Keeping container for debugging"
+        );
+        println!(
+            "Container retained for debugging: {} (use `docker rm -f {}` to remove)",
+            container.id, container.id
+        );
+    } else {
+        // Remove the container
+        tracing::info!(container_id = %container.id, "Removing container");
+        if let Err(e) = container_manager
+            .remove_container(&mut container, true)
+            .await
+        {
+            tracing::warn!(error = %e, "Failed to remove container");
+        }
+        println!("Container removed");
     }
-    println!("Container removed");
 
     // Cancel the server
     server_handle.abort();
@@ -302,27 +323,27 @@ async fn run_smile_loop(args: Args) -> anyhow::Result<()> {
 
 /// Runs the main Student-Mentor loop.
 ///
-/// This function polls the shared state waiting for callbacks from the
-/// agent wrappers via the HTTP API.
+/// This function orchestrates the Student-Mentor loop by:
+/// 1. Starting wrapper processes in the container when entering Running states
+/// 2. Transitioning to Waiting states after starting wrappers
+/// 3. Waiting for callbacks from wrappers via the HTTP API
+/// 4. Handling state transitions based on wrapper results
+#[allow(clippy::too_many_lines)] // Main loop inherently complex with state machine handling
 async fn run_main_loop(
     loop_state: &Arc<Mutex<LoopState>>,
     state_path: &Path,
     config: &Config,
-    _container_manager: &ContainerManager,
-    _container: &mut smile_container::Container,
+    container_manager: &ContainerManager,
+    container: &smile_container::Container,
 ) -> anyhow::Result<()> {
     // Initialize the loop if starting fresh
     {
         let mut state = loop_state.lock().await;
         if state.status == LoopStatus::Starting {
             state.start()?;
-            state.start_waiting_for_student()?;
             state.save(state_path).await?;
-            tracing::info!(
-                iteration = state.iteration,
-                "Loop started, waiting for student"
-            );
-            println!("Iteration 1: Waiting for student agent...");
+            tracing::info!(iteration = state.iteration, "Loop started");
+            println!("Iteration 1: Starting student agent...");
         }
     }
 
@@ -344,7 +365,7 @@ async fn run_main_loop(
                 break;
             }
             () = sleep(poll_interval) => {
-                // Check current state
+                // Check current state and handle transitions
                 let (status, iteration, is_terminal) = {
                     let mut state = loop_state.lock().await;
 
@@ -357,6 +378,65 @@ async fn run_main_loop(
 
                     (state.status, state.iteration, state.is_terminal())
                 };
+
+                // Handle running states by invoking wrappers
+                match status {
+                    LoopStatus::RunningStudent => {
+                        // Get mentor notes from state
+                        let mentor_notes = {
+                            let state = loop_state.lock().await;
+                            state.mentor_notes.clone()
+                        };
+
+                        // Invoke student wrapper in the container
+                        tracing::info!(iteration, "Invoking student wrapper");
+                        invoke_student_wrapper(
+                            container_manager,
+                            container,
+                            iteration,
+                            config,
+                            &mentor_notes,
+                        )
+                        .await?;
+
+                        // Transition to waiting state
+                        let mut state = loop_state.lock().await;
+                        state.start_waiting_for_student()?;
+                        state.save(state_path).await?;
+                        drop(state);
+                        tracing::info!(iteration, "Waiting for student callback");
+                    }
+                    LoopStatus::RunningMentor => {
+                        // Get the current question and last student output for the mentor
+                        let (question, last_student_output) = {
+                            let state = loop_state.lock().await;
+                            let last_output = state
+                                .history
+                                .last()
+                                .map(|record| record.student_output.clone());
+                            (state.current_question.clone(), last_output)
+                        };
+
+                        // Invoke mentor wrapper in the container
+                        tracing::info!(iteration, "Invoking mentor wrapper");
+                        invoke_mentor_wrapper(
+                            container_manager,
+                            container,
+                            config,
+                            last_student_output.as_ref(),
+                            question.as_deref(),
+                        )
+                        .await?;
+
+                        // Transition to waiting state
+                        let mut state = loop_state.lock().await;
+                        state.start_waiting_for_mentor()?;
+                        state.save(state_path).await?;
+                        drop(state);
+                        tracing::info!(iteration, "Waiting for mentor callback");
+                    }
+                    _ => {}
+                }
 
                 // Print status changes
                 if status != last_status {
@@ -387,6 +467,196 @@ async fn run_main_loop(
         }
     }
 
+    Ok(())
+}
+
+/// Writes a JSON file to the container filesystem.
+///
+/// Uses `echo` and shell redirection to write the serialized JSON content
+/// to the specified path inside the container.
+#[allow(clippy::future_not_send)] // T is Serialize and only used synchronously
+async fn write_json_to_container<T: Serialize>(
+    container_manager: &ContainerManager,
+    container: &smile_container::Container,
+    path: &str,
+    data: &T,
+) -> anyhow::Result<()> {
+    let json = serde_json::to_string(data)
+        .map_err(|e| anyhow::anyhow!("Failed to serialize JSON: {e}"))?;
+
+    // Escape the JSON for safe shell embedding
+    // Replace single quotes with '\'' to safely pass through shell
+    let escaped_json = json.replace('\'', "'\\''");
+
+    let shell_cmd = format!("printf '%s' '{escaped_json}' > {path}");
+    let exec_cmd = vec!["sh", "-c", &shell_cmd];
+
+    tracing::debug!(path, "Writing JSON file to container");
+
+    let output = container_manager
+        .exec_in_container(container, exec_cmd)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to write {path} to container: {e}"))?;
+
+    if !output.success() {
+        return Err(anyhow::anyhow!(
+            "Failed to write {}: exit code {} - {}",
+            path,
+            output.exit_code,
+            output.output
+        ));
+    }
+
+    Ok(())
+}
+
+/// Stuck context passed to the mentor wrapper.
+///
+/// This struct matches the Python `StuckContext` model expected by the mentor wrapper.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StuckContext {
+    /// The step the student was working on when they got stuck.
+    current_step: String,
+    /// Description of the problem encountered.
+    problem: String,
+    /// The specific question for the mentor.
+    question: String,
+}
+
+/// Invokes the student wrapper inside the container.
+///
+/// The student wrapper is invoked as a Python module that:
+/// 1. Loads the tutorial and config from `/workspace/config.json`
+/// 2. Loads mentor notes from `/workspace/mentor_notes.json`
+/// 3. Invokes the LLM CLI to process the tutorial
+/// 4. Reports results back to the orchestrator via HTTP callback
+async fn invoke_student_wrapper(
+    container_manager: &ContainerManager,
+    container: &smile_container::Container,
+    iteration: u32,
+    config: &Config,
+    mentor_notes: &[MentorNote],
+) -> anyhow::Result<()> {
+    tracing::debug!(iteration, "Provisioning files for student wrapper");
+
+    // Write config.json to the container
+    write_json_to_container(
+        container_manager,
+        container,
+        "/workspace/config.json",
+        config,
+    )
+    .await?;
+
+    // Write mentor_notes.json - convert to list of answer strings
+    let notes_list: Vec<&str> = mentor_notes.iter().map(|n| n.answer.as_str()).collect();
+    write_json_to_container(
+        container_manager,
+        container,
+        "/workspace/mentor_notes.json",
+        &notes_list,
+    )
+    .await?;
+
+    tracing::debug!(iteration, "Executing student wrapper");
+
+    // Set the iteration as an environment variable via a shell command
+    let shell_cmd = format!("SMILE_ITERATION={iteration} python -m smile_wrappers.student");
+    let exec_cmd = vec!["sh", "-c", &shell_cmd];
+
+    let output = container_manager
+        .exec_in_container(container, exec_cmd)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to execute student wrapper: {e}"))?;
+
+    if !output.success() {
+        tracing::warn!(
+            exit_code = output.exit_code,
+            output = %output.output,
+            "Student wrapper exited with non-zero code"
+        );
+        // Exit code 42 means stop was requested, which is expected
+        if output.exit_code != 42 {
+            return Err(anyhow::anyhow!(
+                "Student wrapper failed with exit code {}: {}",
+                output.exit_code,
+                output.output
+            ));
+        }
+    }
+
+    tracing::debug!(output = %output.output, "Student wrapper completed");
+    Ok(())
+}
+
+/// Invokes the mentor wrapper inside the container.
+///
+/// The mentor wrapper is invoked as a Python module that:
+/// 1. Loads the config from `/workspace/config.json`
+/// 2. Loads the stuck context from `/workspace/stuck_context.json`
+/// 3. Invokes the LLM CLI to generate guidance
+/// 4. Reports results back to the orchestrator via HTTP callback
+async fn invoke_mentor_wrapper(
+    container_manager: &ContainerManager,
+    container: &smile_container::Container,
+    config: &Config,
+    last_student_output: Option<&StudentOutput>,
+    question: Option<&str>,
+) -> anyhow::Result<()> {
+    tracing::debug!(question = ?question, "Provisioning files for mentor wrapper");
+
+    // Write config.json to the container
+    write_json_to_container(
+        container_manager,
+        container,
+        "/workspace/config.json",
+        config,
+    )
+    .await?;
+
+    // Build stuck context from last student output and current question
+    let stuck_context = StuckContext {
+        current_step: last_student_output
+            .map_or_else(|| "Unknown step".to_string(), |o| o.current_step.clone()),
+        problem: last_student_output
+            .and_then(|o| o.problem.clone())
+            .unwrap_or_else(|| "Unable to proceed".to_string()),
+        question: question.unwrap_or("How should I proceed?").to_string(),
+    };
+
+    write_json_to_container(
+        container_manager,
+        container,
+        "/workspace/stuck_context.json",
+        &stuck_context,
+    )
+    .await?;
+
+    tracing::debug!("Executing mentor wrapper");
+
+    let output = container_manager
+        .exec_in_container(container, vec!["python", "-m", "smile_wrappers.mentor"])
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to execute mentor wrapper: {e}"))?;
+
+    if !output.success() {
+        tracing::warn!(
+            exit_code = output.exit_code,
+            output = %output.output,
+            "Mentor wrapper exited with non-zero code"
+        );
+        // Exit code 42 means stop was requested, which is expected
+        if output.exit_code != 42 {
+            return Err(anyhow::anyhow!(
+                "Mentor wrapper failed with exit code {}: {}",
+                output.exit_code,
+                output.output
+            ));
+        }
+    }
+
+    tracing::debug!(output = %output.output, "Mentor wrapper completed");
     Ok(())
 }
 

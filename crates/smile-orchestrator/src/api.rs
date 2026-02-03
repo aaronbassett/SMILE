@@ -288,16 +288,29 @@ async fn handle_student_result(
 
     let mut loop_state = state.loop_state.lock().await;
 
-    // Check if loop is in a valid state to receive student results
-    if !matches!(loop_state.status, LoopStatus::WaitingForStudent) {
+    // Check if loop is in a valid state to receive student results.
+    // Accept both RunningStudent and WaitingForStudent states to handle race conditions
+    // where the callback arrives before the orchestrator transitions to the waiting state.
+    if !matches!(
+        loop_state.status,
+        LoopStatus::WaitingForStudent | LoopStatus::RunningStudent
+    ) {
         warn!(
             current_status = %loop_state.status,
-            "Cannot accept student result: loop not waiting for student"
+            "Cannot accept student result: loop not in student phase"
         );
         return Err(ApiError::LoopNotRunning(format!(
-            "Loop is not waiting for student result (current status: {})",
+            "Loop is not in student phase (current status: {})",
             loop_state.status
         )));
+    }
+
+    // If still in RunningStudent, transition to waiting first
+    if loop_state.status == LoopStatus::RunningStudent {
+        info!("Callback arrived early, transitioning to WaitingForStudent");
+        loop_state
+            .start_waiting_for_student()
+            .map_err(|e| ApiError::StateTransition(e.to_string()))?;
     }
 
     // Process the result
@@ -358,16 +371,29 @@ async fn handle_mentor_result(
 
     let mut loop_state = state.loop_state.lock().await;
 
-    // Check if loop is in a valid state to receive mentor results
-    if !matches!(loop_state.status, LoopStatus::WaitingForMentor) {
+    // Check if loop is in a valid state to receive mentor results.
+    // Accept both RunningMentor and WaitingForMentor states to handle race conditions
+    // where the callback arrives before the orchestrator transitions to the waiting state.
+    if !matches!(
+        loop_state.status,
+        LoopStatus::WaitingForMentor | LoopStatus::RunningMentor
+    ) {
         warn!(
             current_status = %loop_state.status,
-            "Cannot accept mentor result: loop not waiting for mentor"
+            "Cannot accept mentor result: loop not in mentor phase"
         );
         return Err(ApiError::LoopNotRunning(format!(
-            "Loop is not waiting for mentor result (current status: {})",
+            "Loop is not in mentor phase (current status: {})",
             loop_state.status
         )));
+    }
+
+    // If still in RunningMentor, transition to waiting first
+    if loop_state.status == LoopStatus::RunningMentor {
+        info!("Callback arrived early, transitioning to WaitingForMentor");
+        loop_state
+            .start_waiting_for_mentor()
+            .map_err(|e| ApiError::StateTransition(e.to_string()))?;
     }
 
     // Get the current question before we clear it
@@ -659,7 +685,7 @@ mod tests {
             .unwrap();
         let error: ErrorResponse = serde_json::from_slice(&body).unwrap();
 
-        assert!(error.error.contains("not waiting for student"));
+        assert!(error.error.contains("not in student phase"));
     }
 
     #[tokio::test]
@@ -750,7 +776,7 @@ mod tests {
             .unwrap();
         let error: ErrorResponse = serde_json::from_slice(&body).unwrap();
 
-        assert!(error.error.contains("not waiting for mentor"));
+        assert!(error.error.contains("not in mentor phase"));
     }
 
     // ------------------------------------------------------------------------
