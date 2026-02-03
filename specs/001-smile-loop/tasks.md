@@ -216,9 +216,9 @@ Shared infrastructure required by all user stories.
 **Independent Test**: Run Student with tutorials of varying quality, verify appropriate outputs
 
 ### Phase Start
-- [ ] T101 [GIT] Verify working tree is clean before starting Phase 6
-- [ ] T102 [GIT] Pull and rebase on origin/main if needed
-- [ ] T103 [US5] Create retro/P6.md for this phase
+- [x] T101 [GIT] Verify working tree is clean before starting Phase 6
+- [x] T102 [GIT] Pull and rebase on origin/main if needed
+- [x] T103 [US5] Create retro/P6.md for this phase
 - [ ] T104 [GIT] Commit: initialize phase 6 retro
 
 ### Implementation
