@@ -12,6 +12,8 @@ import os
 import re
 import subprocess
 import sys
+from collections import defaultdict
+from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -29,6 +31,8 @@ __all__ = [
     "LlmCliError",
     "LlmParseError",
     "LlmTimeoutError",
+    "StuckCondition",
+    "StuckDetector",
     "StudentWrapper",
     "main",
 ]
@@ -41,6 +45,272 @@ DEFAULT_MENTOR_NOTES_FILE = "/workspace/mentor_notes.json"
 
 # Maximum retry attempts for JSON parsing
 MAX_PARSE_RETRIES = 3
+
+
+class StuckCondition(Enum):
+    """Classification of why the student got stuck.
+
+    Each condition represents a specific type of difficulty that the student
+    encountered, helping the orchestrator and mentor understand the nature
+    of the problem.
+
+    Attributes:
+        TIMEOUT: The operation exceeded the configured timeout duration.
+        MAX_RETRIES: Maximum retry attempts reached for the same step.
+        MISSING_DEPENDENCY: A required dependency (package, tool, etc.) is missing.
+        AMBIGUOUS_INSTRUCTION: The tutorial instruction is unclear or ambiguous.
+        COMMAND_FAILURE: A shell command failed with a non-zero exit code.
+        PARSE_FAILURE: Unable to parse LLM output as valid JSON.
+        CANNOT_COMPLETE: The step cannot be completed for other reasons.
+    """
+
+    TIMEOUT = "timeout"
+    MAX_RETRIES = "max_retries"
+    MISSING_DEPENDENCY = "missing_dependency"
+    AMBIGUOUS_INSTRUCTION = "ambiguous_instruction"
+    COMMAND_FAILURE = "command_failure"
+    PARSE_FAILURE = "parse_failure"
+    CANNOT_COMPLETE = "cannot_complete"
+
+
+# Patterns for detecting missing dependencies
+_MISSING_DEPENDENCY_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"command not found", re.IGNORECASE),
+    re.compile(r"ModuleNotFoundError", re.IGNORECASE),
+    re.compile(r"No module named", re.IGNORECASE),
+    re.compile(r"not installed", re.IGNORECASE),
+    re.compile(r"package .* not found", re.IGNORECASE),
+    re.compile(r"Cannot find module", re.IGNORECASE),
+    re.compile(r"ImportError", re.IGNORECASE),
+    re.compile(r"error: externally-managed-environment", re.IGNORECASE),
+    re.compile(r"pip install", re.IGNORECASE),
+    re.compile(r"npm install", re.IGNORECASE),
+    re.compile(r"cargo install", re.IGNORECASE),
+    re.compile(r"apt install", re.IGNORECASE),
+    re.compile(r"brew install", re.IGNORECASE),
+]
+
+# Patterns for detecting ambiguous instructions
+_AMBIGUOUS_INSTRUCTION_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"\bunclear\b", re.IGNORECASE),
+    re.compile(r"\bambiguous\b", re.IGNORECASE),
+    re.compile(r"don'?t understand", re.IGNORECASE),
+    re.compile(r"not sure (what|which|how)", re.IGNORECASE),
+    re.compile(r"which (one|version|option)", re.IGNORECASE),
+    re.compile(r"what (do you mean|does .* mean)", re.IGNORECASE),
+    re.compile(r"could you clarify", re.IGNORECASE),
+    re.compile(r"please clarify", re.IGNORECASE),
+    re.compile(r"need more (information|details|context)", re.IGNORECASE),
+    re.compile(r"instructions? (are|is) (unclear|confusing)", re.IGNORECASE),
+    re.compile(r"multiple (ways|options|interpretations)", re.IGNORECASE),
+]
+
+# Patterns for detecting command failures
+_COMMAND_FAILURE_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"^error:", re.IGNORECASE | re.MULTILINE),
+    re.compile(r"^failed:", re.IGNORECASE | re.MULTILINE),
+    re.compile(r"command failed", re.IGNORECASE),
+    re.compile(r"exit (code|status) [1-9]", re.IGNORECASE),
+    re.compile(r"non-zero exit", re.IGNORECASE),
+    re.compile(r"permission denied", re.IGNORECASE),
+    re.compile(r"access denied", re.IGNORECASE),
+    re.compile(r"operation not permitted", re.IGNORECASE),
+    re.compile(r"fatal error", re.IGNORECASE),
+    re.compile(r"compilation failed", re.IGNORECASE),
+    re.compile(r"build failed", re.IGNORECASE),
+]
+
+
+class StuckDetector:
+    """Detector for classifying why the student got stuck.
+
+    Tracks retry counts per step and analyzes error messages and output
+    to classify stuck conditions. Used by `StudentWrapper` to determine
+    when and why to escalate to the mentor.
+
+    Attributes:
+        config: Student behavior configuration controlling escalation rules.
+        stuck_condition: The most recently detected stuck condition, if any.
+
+    Example:
+        >>> detector = StuckDetector(config=StudentBehavior())
+        >>> detector.record_attempt("Install dependencies", success=False)
+        False
+        >>> detector.record_attempt("Install dependencies", success=False)
+        False
+        >>> detector.record_attempt("Install dependencies", success=False)
+        True  # max_retries reached
+        >>> detector.stuck_condition
+        <StuckCondition.MAX_RETRIES: 'max_retries'>
+    """
+
+    def __init__(self, config: StudentBehavior) -> None:
+        """Initialize the StuckDetector.
+
+        Args:
+            config: Student behavior configuration controlling escalation rules.
+        """
+        self.config = config
+        self.stuck_condition: StuckCondition | None = None
+        self._retry_counts: dict[str, int] = defaultdict(int)
+
+    def record_attempt(self, step: str, *, success: bool) -> bool:
+        """Record an attempt at a step and check if max retries reached.
+
+        Tracks the number of failed attempts for each step. When the
+        maximum retry count is reached, sets `stuck_condition` to
+        `MAX_RETRIES` and returns True.
+
+        Args:
+            step: Identifier or description of the current step.
+            success: Whether the attempt succeeded.
+
+        Returns:
+            True if max retries have been reached, False otherwise.
+        """
+        if success:
+            # Reset counter on success
+            self._retry_counts[step] = 0
+            return False
+
+        self._retry_counts[step] += 1
+
+        if self._retry_counts[step] >= self.config.max_retries_before_help:
+            self.stuck_condition = StuckCondition.MAX_RETRIES
+            return True
+
+        return False
+
+    def classify_output(self, output: StudentOutput) -> StuckCondition | None:
+        """Classify stuck condition from a StudentOutput.
+
+        Analyzes the output status, problem description, and other fields
+        to determine if and why the student is stuck.
+
+        Args:
+            output: The StudentOutput to analyze.
+
+        Returns:
+            The detected StuckCondition, or None if not stuck.
+        """
+        # Check status first
+        if output.status == "completed":
+            return None
+
+        if output.status == "cannot_complete":
+            self.stuck_condition = StuckCondition.CANNOT_COMPLETE
+            return self.stuck_condition
+
+        # For ask_mentor status, analyze the problem and question
+        text_to_analyze = " ".join(
+            filter(
+                None,
+                [
+                    output.problem,
+                    output.question_for_mentor,
+                    output.reason,
+                    output.summary,
+                ],
+            )
+        )
+
+        if text_to_analyze:
+            condition = self._detect_condition_from_text(text_to_analyze)
+            if condition:
+                self.stuck_condition = condition
+                return condition
+
+        # Default to None if we can't classify
+        return None
+
+    def detect_from_error(self, error: str) -> StuckCondition | None:
+        """Detect stuck condition from an error message.
+
+        Analyzes error text to identify specific stuck conditions like
+        missing dependencies or command failures.
+
+        Args:
+            error: The error message to analyze.
+
+        Returns:
+            The detected StuckCondition, or None if not detected.
+        """
+        condition = self._detect_condition_from_text(error)
+        if condition:
+            self.stuck_condition = condition
+        return condition
+
+    def _detect_condition_from_text(self, text: str) -> StuckCondition | None:
+        """Detect stuck condition from arbitrary text.
+
+        Args:
+            text: The text to analyze for patterns.
+
+        Returns:
+            The detected StuckCondition, or None if no pattern matches.
+        """
+        # Check for missing dependency patterns first (most specific)
+        for pattern in _MISSING_DEPENDENCY_PATTERNS:
+            if pattern.search(text):
+                return StuckCondition.MISSING_DEPENDENCY
+
+        # Check for ambiguous instruction patterns
+        for pattern in _AMBIGUOUS_INSTRUCTION_PATTERNS:
+            if pattern.search(text):
+                return StuckCondition.AMBIGUOUS_INSTRUCTION
+
+        # Check for command failure patterns
+        for pattern in _COMMAND_FAILURE_PATTERNS:
+            if pattern.search(text):
+                return StuckCondition.COMMAND_FAILURE
+
+        return None
+
+    def should_ask_mentor(self, condition: StuckCondition) -> bool:
+        """Check if the given condition should trigger mentor assistance.
+
+        Uses the configuration to determine whether the specific condition
+        warrants escalating to the mentor.
+
+        Args:
+            condition: The stuck condition to check.
+
+        Returns:
+            True if the condition should trigger mentor assistance.
+        """
+        # Map conditions to config attributes (or None for always-true)
+        condition_config_map: dict[StuckCondition, bool | None] = {
+            StuckCondition.TIMEOUT: self.config.ask_on_timeout,
+            StuckCondition.MISSING_DEPENDENCY: self.config.ask_on_missing_dependency,
+            StuckCondition.AMBIGUOUS_INSTRUCTION: self.config.ask_on_ambiguous_instruction,
+            StuckCondition.COMMAND_FAILURE: self.config.ask_on_command_failure,
+            StuckCondition.MAX_RETRIES: None,  # Always ask
+            StuckCondition.PARSE_FAILURE: None,  # Always ask
+            StuckCondition.CANNOT_COMPLETE: None,  # Always ask
+        }
+        config_value = condition_config_map.get(condition)
+        # None means always ask, otherwise use the config value
+        return config_value is None or config_value
+
+    def reset(self) -> None:
+        """Reset the detector state.
+
+        Clears all retry counts and the stuck condition. Call this
+        when starting a new iteration or tutorial.
+        """
+        self._retry_counts.clear()
+        self.stuck_condition = None
+
+    def get_retry_count(self, step: str) -> int:
+        """Get the current retry count for a step.
+
+        Args:
+            step: Identifier or description of the step.
+
+        Returns:
+            The number of failed attempts for this step.
+        """
+        return self._retry_counts.get(step, 0)
 
 
 class LlmCliError(Exception):
@@ -334,16 +604,22 @@ class StudentWrapper:
         tutorial_content: The tutorial markdown content.
         mentor_notes: Notes from previous mentor interactions.
         iteration: The current iteration number (1-indexed).
+        stuck_detector: Optional detector for classifying stuck conditions.
+        stuck_condition: The detected stuck condition after running, if any.
 
     Example:
+        >>> detector = StuckDetector(config=StudentBehavior())
         >>> wrapper = StudentWrapper(
         ...     config=StudentBehavior(),
         ...     provider=LlmProvider.CLAUDE,
         ...     tutorial_content="# Tutorial...",
         ...     mentor_notes=[],
-        ...     iteration=1
+        ...     iteration=1,
+        ...     stuck_detector=detector,
         ... )
-        >>> result = wrapper.run()  # Returns StudentOutput
+        >>> result = wrapper.run()
+        >>> if wrapper.stuck_condition:
+        ...     print(f"Student got stuck: {wrapper.stuck_condition}")
     """
 
     def __init__(
@@ -354,6 +630,7 @@ class StudentWrapper:
         tutorial_content: str,
         mentor_notes: list[str],
         iteration: int,
+        stuck_detector: StuckDetector | None = None,
     ) -> None:
         """Initialize the StudentWrapper.
 
@@ -363,12 +640,16 @@ class StudentWrapper:
             tutorial_content: The full markdown content of the tutorial.
             mentor_notes: List of notes from previous mentor interactions.
             iteration: The current iteration number (1-indexed).
+            stuck_detector: Optional detector for tracking retries and classifying
+                stuck conditions. If not provided, stuck detection is disabled.
         """
         self.config = config
         self.provider = provider
         self.tutorial_content = tutorial_content
         self.mentor_notes = mentor_notes
         self.iteration = iteration
+        self.stuck_detector = stuck_detector
+        self.stuck_condition: StuckCondition | None = None
 
     def _build_prompt(self) -> str:
         """Build the prompt for the student agent.
@@ -383,16 +664,43 @@ class StudentWrapper:
             iteration=self.iteration,
         )
 
-    def _create_fallback_output(self, error: Exception) -> StudentOutput:
+    def _create_fallback_output(
+        self,
+        error: Exception,
+        *,
+        condition: StuckCondition | None = None,
+    ) -> StudentOutput:
         """Create a fallback StudentOutput when all retries fail.
 
         Args:
             error: The exception that caused the final failure.
+            condition: Optional stuck condition to set. If not provided,
+                the condition is inferred from the error type.
 
         Returns:
             A StudentOutput indicating the need for mentor assistance.
         """
         error_message = str(error)
+
+        # Determine stuck condition from error type if not provided
+        if condition is None:
+            if isinstance(error, LlmTimeoutError):
+                condition = StuckCondition.TIMEOUT
+            elif isinstance(error, LlmParseError):
+                condition = StuckCondition.PARSE_FAILURE
+            elif self.stuck_detector:
+                # Try to detect from error message
+                condition = self.stuck_detector.detect_from_error(error_message)
+                if condition is None:
+                    condition = StuckCondition.COMMAND_FAILURE
+
+        # Set stuck_condition on wrapper
+        self.stuck_condition = condition
+
+        # Also update detector if available
+        if self.stuck_detector and condition:
+            self.stuck_detector.stuck_condition = condition
+
         if isinstance(error, LlmTimeoutError):
             problem = f"LLM CLI timed out after {error.timeout_seconds} seconds"
             question = (
@@ -420,12 +728,92 @@ class StudentWrapper:
             summary="Failed to process tutorial due to LLM CLI issues",
         )
 
-    def run(self) -> StudentOutput:
+    def _record_failed_attempt(self, step: str, error: Exception) -> StudentOutput | None:
+        """Record a failed attempt and return fallback if max retries reached.
+
+        Args:
+            step: The step being attempted.
+            error: The exception that caused the failure.
+
+        Returns:
+            A fallback StudentOutput if max retries reached, None otherwise.
+        """
+        if not self.stuck_detector:
+            return None
+        max_reached = self.stuck_detector.record_attempt(step, success=False)
+        if max_reached:
+            return self._create_fallback_output(error, condition=StuckCondition.MAX_RETRIES)
+        return None
+
+    def _handle_successful_output(self, result: StudentOutput, current_step: str) -> None:
+        """Handle a successful LLM output by updating detector state.
+
+        Args:
+            result: The parsed StudentOutput.
+            current_step: The step being attempted.
+        """
+        if not self.stuck_detector:
+            return
+        condition = self.stuck_detector.classify_output(result)
+        if condition:
+            self.stuck_condition = condition
+        if result.status == "completed":
+            self.stuck_detector.record_attempt(current_step, success=True)
+
+    def _handle_timeout_error(
+        self, error: LlmTimeoutError, current_step: str
+    ) -> StudentOutput | None:
+        """Handle timeout error and return fallback if needed.
+
+        Args:
+            error: The timeout error.
+            current_step: The step being attempted.
+
+        Returns:
+            Fallback output if should ask mentor, None to re-raise.
+        """
+        if fallback := self._record_failed_attempt(current_step, error):
+            return fallback
+        if self.config.ask_on_timeout:
+            return self._create_fallback_output(error, condition=StuckCondition.TIMEOUT)
+        return None
+
+    def _handle_cli_error(self, error: LlmCliError, current_step: str) -> StudentOutput | None:
+        """Handle CLI error and return fallback if needed.
+
+        Args:
+            error: The CLI error.
+            current_step: The step being attempted.
+
+        Returns:
+            Fallback output if should ask mentor, None to re-raise.
+        """
+        if fallback := self._record_failed_attempt(current_step, error):
+            return fallback
+        detected_condition = (
+            self.stuck_detector.detect_from_error(error.stderr)
+            if self.stuck_detector and error.stderr
+            else None
+        )
+        if self.config.ask_on_command_failure:
+            return self._create_fallback_output(error, condition=detected_condition)
+        return None
+
+    def run(self, *, current_step: str = "Initial tutorial processing") -> StudentOutput:
         """Execute the student agent and return the result.
 
         Builds the prompt, invokes the LLM CLI, and parses the response.
         Retries up to MAX_PARSE_RETRIES times on parse errors before
         returning a fallback response requesting mentor assistance.
+
+        If a `stuck_detector` is configured, it will be used to:
+        - Track retry attempts per step
+        - Classify stuck conditions from errors and output
+        - Set the `stuck_condition` attribute on this wrapper
+
+        Args:
+            current_step: Description of the current step being attempted.
+                Used for retry tracking with StuckDetector.
 
         Returns:
             A StudentOutput object containing the result of the step attempt.
@@ -436,39 +824,40 @@ class StudentWrapper:
         """
         prompt = self._build_prompt()
         cli = LlmCli(self.provider, timeout_seconds=self.config.timeout_seconds)
-
         last_error: Exception | None = None
 
         for attempt in range(MAX_PARSE_RETRIES):
             try:
                 output = cli.invoke(prompt)
-                return _parse_student_output(output, self.provider)
+                result = _parse_student_output(output, self.provider)
+                self._handle_successful_output(result, current_step)
+                return result
+
             except LlmTimeoutError as e:
-                # On timeout, immediately return fallback if configured to ask mentor
-                if self.config.ask_on_timeout:
-                    return self._create_fallback_output(e)
+                if fallback := self._handle_timeout_error(e, current_step):
+                    return fallback
                 raise
+
             except LlmParseError as e:
                 last_error = e
-                # Log the attempt (in production, use proper logging)
                 print(
                     f"Parse attempt {attempt + 1}/{MAX_PARSE_RETRIES} failed: {e.parse_error}",
                     file=sys.stderr,
                 )
-                # Continue to next retry
+                if fallback := self._record_failed_attempt(current_step, e):
+                    return fallback
                 continue
+
             except LlmCliError as e:
-                # For other CLI errors, return fallback if configured
-                if self.config.ask_on_command_failure:
-                    return self._create_fallback_output(e)
+                if fallback := self._handle_cli_error(e, current_step):
+                    return fallback
                 raise
 
-        # All retries exhausted, return fallback
-        if last_error is not None:
-            return self._create_fallback_output(last_error)
-
-        # This should never happen, but satisfy type checker
-        return self._create_fallback_output(LlmCliError("Unknown error during student execution"))
+        # All retries exhausted
+        return self._create_fallback_output(
+            last_error or LlmCliError("Unknown error"),
+            condition=StuckCondition.PARSE_FAILURE,
+        )
 
 
 def _load_config_from_file(config_path: Path) -> Config:
