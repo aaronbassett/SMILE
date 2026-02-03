@@ -5,9 +5,32 @@
 
 use std::path::{Path, PathBuf};
 
+use once_cell::sync::Lazy;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, SmileError};
+
+/// Regex pattern for extracting markdown image references.
+///
+/// Matches markdown image syntax: `![alt text](path)` and `![](path)`
+/// Captures the path portion in group 1.
+///
+/// Pattern explanation:
+/// - `!\[` - literal "!["
+/// - `[^\]]*` - any chars except "]" (alt text)
+/// - `\]\(` - literal "]("
+/// - `([^)\s]+)` - capture group: path (no parens or whitespace)
+/// - `(?:\s+[^)]*)?` - optional title after whitespace
+/// - `\)` - closing paren
+///
+/// # Panics
+///
+/// Panics at initialization if the regex pattern is invalid. This is a compile-time
+/// constant pattern that has been verified to be correct.
+#[allow(clippy::expect_used)] // Pattern is a compile-time constant; panic at init is acceptable
+static IMAGE_REGEX: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"!\[[^\]]*\]\(([^)\s]+)(?:\s+[^)]*)?\)").expect("valid regex"));
 
 /// Maximum allowed tutorial file size in bytes (100KB).
 pub const MAX_TUTORIAL_SIZE: u64 = 100 * 1024;
@@ -251,22 +274,8 @@ impl Tutorial {
 /// Parses markdown image syntax: `![alt text](path)` and `![](path)`
 /// Returns a vector of the path strings (not including alt text).
 fn extract_image_references(content: &str) -> Vec<String> {
-    use regex::Regex;
-
-    // Regex to match markdown image syntax: ![alt](path)
-    // Captures the path portion in group 1
-    // Pattern explanation:
-    // - `!\[` - literal "!["
-    // - `[^\]]*` - any chars except "]" (alt text)
-    // - `\]\(` - literal "]("
-    // - `([^)\s]+)` - capture group: path (no parens or whitespace)
-    // - `(?:\s+[^)]*)?` - optional title after whitespace
-    // - `\)` - closing paren
-    let Ok(re) = Regex::new(r"!\[[^\]]*\]\(([^)\s]+)(?:\s+[^)]*)?\)") else {
-        return Vec::new();
-    };
-
-    re.captures_iter(content)
+    IMAGE_REGEX
+        .captures_iter(content)
         .filter_map(|cap| cap.get(1).map(|m| m.as_str().to_string()))
         .collect()
 }
