@@ -41,6 +41,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Time
 chrono = { version = "0.4", features = ["serde"] }
+# Pin time for MSRV 1.75 compatibility (time-core 0.1.8+ requires edition2024/Rust 1.85+)
+time = ">=0.3.17, <0.3.42"
 
 # Error handling
 thiserror = "1.0"
