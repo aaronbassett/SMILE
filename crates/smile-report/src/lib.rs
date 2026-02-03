@@ -1431,11 +1431,19 @@ impl ReportGenerator {
 }
 
 /// Truncates a string to the specified maximum length, adding "..." if truncated.
+/// Uses character boundaries to avoid panics on multibyte UTF-8 characters.
 fn truncate_string(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
         s.to_string()
     } else {
-        format!("{}...", &s[..max_len.saturating_sub(3)])
+        // Find a valid char boundary at or before max_len - 3 (for "...")
+        let target = max_len.saturating_sub(3);
+        let truncate_at = s
+            .char_indices()
+            .take_while(|(idx, _)| *idx < target)
+            .last()
+            .map_or(0, |(idx, c)| idx + c.len_utf8());
+        format!("{}...", &s[..truncate_at])
     }
 }
 
@@ -1924,6 +1932,25 @@ mod tests {
         assert_eq!(truncate_string("this is a long string", 10), "this is...");
         assert_eq!(truncate_string("abc", 3), "abc");
         assert_eq!(truncate_string("abcd", 3), "...");
+    }
+
+    #[test]
+    fn test_truncate_string_unicode() {
+        // Ensure multibyte UTF-8 characters don't cause panics
+        // Each emoji is 4 bytes, so "🚀🎉🔥" is 12 bytes
+        let emojis = "🚀🎉🔥";
+        // Truncating to 10 bytes (less than 12) should not panic
+        let result = truncate_string(emojis, 10);
+        // Should truncate at char boundary, keeping at most 2 emojis + "..."
+        assert!(result.ends_with("..."));
+        // Verify we can iterate over the chars (proves valid UTF-8)
+        assert!(result.chars().count() > 0);
+
+        // Test with mixed ASCII and multibyte
+        let mixed = "Hello 世界!";
+        let result = truncate_string(mixed, 10);
+        assert!(result.ends_with("..."));
+        assert!(result.chars().count() > 0);
     }
 
     #[test]

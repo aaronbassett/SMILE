@@ -489,6 +489,7 @@ fn escape_markdown_inline_code(text: &str) -> String {
 }
 
 /// Truncates output to a maximum length, adding an ellipsis if needed.
+/// Uses character boundaries to avoid panics on multibyte UTF-8 characters.
 fn truncate_output(output: &str, max_length: usize) -> String {
     // Take only the first line to avoid table formatting issues
     let first_line = output.lines().next().unwrap_or("");
@@ -496,7 +497,13 @@ fn truncate_output(output: &str, max_length: usize) -> String {
     if first_line.len() <= max_length {
         first_line.to_string()
     } else {
-        format!("{}...", &first_line[..max_length])
+        // Find a valid char boundary at or before max_length
+        let truncate_at = first_line
+            .char_indices()
+            .take_while(|(idx, _)| *idx < max_length)
+            .last()
+            .map_or(0, |(idx, c)| idx + c.len_utf8());
+        format!("{}...", &first_line[..truncate_at])
     }
 }
 
@@ -706,6 +713,24 @@ mod tests {
             truncate_output("first line\nsecond line", 100),
             "first line"
         );
+    }
+
+    #[test]
+    fn test_truncate_output_unicode() {
+        // Ensure multibyte UTF-8 characters don't cause panics
+        // Each Chinese character is 3 bytes
+        let chinese = "你好世界這是測試";
+        let result = truncate_output(chinese, 10);
+        // Should truncate at char boundary without panicking
+        assert!(result.ends_with("..."));
+        // Verify valid UTF-8 by iterating chars
+        assert!(result.chars().count() > 0);
+
+        // Test with emojis (4 bytes each)
+        let emojis = "🚀🎉🔥🌟✨";
+        let result = truncate_output(emojis, 10);
+        assert!(result.ends_with("..."));
+        assert!(result.chars().count() > 0);
     }
 
     #[test]
