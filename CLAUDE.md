@@ -124,11 +124,27 @@ Strict ruff configuration enforces these limits:
 
 ## Recent Changes
 
+- 2026-02-03: **v0.1.0-alpha released** - Full SMILE Loop MVP merged to main
+- 2026-02-03: Phase 12 complete - Polish, documentation, edge case validation
+- 2026-02-03: Phase 11 complete - WebSocket real-time observation
+- 2026-02-03: Phase 10 complete - End-to-end integration tests with mock LLM
+- 2026-02-03: Phase 9 complete - Report generation (Markdown/JSON)
+- 2026-02-03: Phase 8 complete - Loop orchestration state machine
+- 2026-02-03: Phase 7 complete - Mentor agent wrapper
 - 2026-02-03: Phase 6 complete - Student agent wrapper with LLM CLI invocation, stuck detection, output parsing
-- 2026-02-03: Phase 5 complete - container management via bollard (create, start, stop, remove, reset)
-- 2026-02-03: Phase 4 complete - tutorial loading, image extraction, CLI integration
-- 2026-02-03: Phase 3 complete - config loading, validation, CLI integration
+- 2026-02-03: Phase 5 complete - container management via bollard
+- 2026-02-03: Phase 4 complete - tutorial loading, image extraction
+- 2026-02-03: Phase 3 complete - config loading, validation
 - 2026-02-02: Initial planning phase for 001-smile-loop feature
+
+## Alpha Feedback
+
+Report issues and feedback at: https://github.com/aaronbassett/SMILE/issues
+
+### Known Alpha Limitations
+- Integration tests skipped in CI (require Docker-in-Docker)
+- LLM CLI installation in container is manual
+- No authentication on WebSocket/HTTP endpoints
 
 ## Useful Files
 
