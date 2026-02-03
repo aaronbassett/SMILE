@@ -321,9 +321,9 @@ Shared infrastructure required by all user stories.
 **Independent Test**: Run loops with known gaps, verify reports accurately document them
 
 ### Phase Start
-- [ ] T167 [GIT] Verify working tree is clean before starting Phase 9
-- [ ] T168 [GIT] Pull and rebase on origin/main if needed
-- [ ] T169 [US10] Create retro/P9.md for this phase
+- [x] T167 [GIT] Verify working tree is clean before starting Phase 9
+- [x] T168 [GIT] Pull and rebase on origin/main if needed (no rebase needed)
+- [x] T169 [US10] Create retro/P9.md for this phase
 - [ ] T170 [GIT] Commit: initialize phase 9 retro
 
 ### Implementation
