@@ -223,8 +223,8 @@ Shared infrastructure required by all user stories.
 
 ### Implementation
 - [x] T105 [P] [US5] Create prompt construction module in python/smile_wrappers/prompts.py (use devs:python-expert agent)
-- [ ] T106 [GIT] Commit: add prompt construction
-- [ ] T107 [US5] Implement Student wrapper with LLM CLI invocation in python/smile_wrappers/student.py (use devs:python-expert agent)
+- [x] T106 [GIT] Commit: add prompt construction
+- [x] T107 [US5] Implement Student wrapper with LLM CLI invocation in python/smile_wrappers/student.py (use devs:python-expert agent)
 - [ ] T108 [GIT] Commit: implement student wrapper
 - [ ] T109 [US6] Implement stuck detection logic based on triggers in python/smile_wrappers/student.py (use devs:python-expert agent)
 - [ ] T110 [GIT] Commit: add stuck detection
