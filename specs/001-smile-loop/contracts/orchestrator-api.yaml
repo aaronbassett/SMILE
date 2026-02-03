@@ -1,0 +1,357 @@
+openapi: 3.1.0
+info:
+  title: SMILE Loop Orchestrator API
+  version: 1.0.0
+  description: |
+    HTTP API for the SMILE Loop orchestrator. Used by agent wrappers running
+    inside Docker containers to report results back to the orchestrator.
+
+servers:
+  - url: http://host.docker.internal:3000
+    description: Orchestrator from inside container
+  - url: http://localhost:3000
+    description: Orchestrator from host (debug)
+
+paths:
+  /api/student/result:
+    post:
+      summary: Report Student agent result
+      description: |
+        Called by the Student wrapper after the Student agent completes
+        (either successfully, asking mentor, or cannot continue).
+      operationId: reportStudentResult
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StudentResultRequest'
+      responses:
+        '200':
+          description: Result acknowledged
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudentResultResponse'
+        '400':
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Loop not running
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/mentor/result:
+    post:
+      summary: Report Mentor agent result
+      description: |
+        Called by the Mentor wrapper after the Mentor agent provides notes
+        for the stuck Student.
+      operationId: reportMentorResult
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MentorResultRequest'
+      responses:
+        '200':
+          description: Result acknowledged
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MentorResultResponse'
+        '400':
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Loop not running
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/status:
+    get:
+      summary: Get current loop status
+      description: Returns the current state of the SMILE loop.
+      operationId: getStatus
+      responses:
+        '200':
+          description: Current loop state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoopState'
+        '503':
+          description: Orchestrator unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/stop:
+    post:
+      summary: Force stop the loop
+      description: Immediately terminates the running loop.
+      operationId: stopLoop
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StopRequest'
+      responses:
+        '200':
+          description: Loop stopped
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StopResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: No loop running
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    # Request schemas
+    StudentResultRequest:
+      type: object
+      required:
+        - studentOutput
+        - timestamp
+      properties:
+        studentOutput:
+          $ref: '#/components/schemas/StudentOutput'
+        timestamp:
+          type: string
+          format: date-time
+          example: "2026-02-02T10:30:00Z"
+
+    MentorResultRequest:
+      type: object
+      required:
+        - mentorOutput
+        - timestamp
+      properties:
+        mentorOutput:
+          type: string
+          description: Text notes from the Mentor agent
+          example: "The tutorial assumes Python 3.11 is installed..."
+        timestamp:
+          type: string
+          format: date-time
+
+    StopRequest:
+      type: object
+      required:
+        - reason
+      properties:
+        reason:
+          type: string
+          description: Why the loop is being stopped
+          example: "User cancelled"
+
+    # Response schemas
+    StudentResultResponse:
+      type: object
+      required:
+        - acknowledged
+        - nextAction
+      properties:
+        acknowledged:
+          type: boolean
+          example: true
+        nextAction:
+          type: string
+          enum: [continue, stop]
+          example: continue
+
+    MentorResultResponse:
+      type: object
+      required:
+        - acknowledged
+        - nextAction
+      properties:
+        acknowledged:
+          type: boolean
+          example: true
+        nextAction:
+          type: string
+          enum: [continue, stop]
+          example: continue
+
+    StopResponse:
+      type: object
+      required:
+        - stopped
+        - finalState
+      properties:
+        stopped:
+          type: boolean
+          example: true
+        finalState:
+          $ref: '#/components/schemas/LoopState'
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          example: "Loop not running"
+
+    # Core data schemas
+    StudentOutput:
+      type: object
+      required:
+        - status
+        - currentStep
+        - attemptedActions
+        - summary
+      properties:
+        status:
+          type: string
+          enum: [completed, ask_mentor, cannot_complete]
+          example: ask_mentor
+        currentStep:
+          type: string
+          description: What step the Student was on
+          example: "Step 3: Install dependencies"
+        attemptedActions:
+          type: array
+          items:
+            type: string
+          example: ["ran pip install -r requirements.txt", "checked Python version"]
+        problem:
+          type: string
+          description: What went wrong (if not completed)
+          example: "Module 'fastapi' not found after installation"
+        questionForMentor:
+          type: string
+          description: Specific question for Mentor (if ask_mentor)
+          example: "How do I install FastAPI when pip install seems to succeed but import fails?"
+        reason:
+          type: string
+          description: Why Student cannot continue (if cannot_complete)
+        summary:
+          type: string
+          description: What was accomplished
+          example: "Completed steps 1-2, stuck on step 3"
+        filesCreated:
+          type: array
+          items:
+            type: string
+          default: []
+          example: ["app.py", "config.json"]
+        commandsRun:
+          type: array
+          items:
+            type: string
+          default: []
+          example: ["pip install -r requirements.txt", "python --version"]
+
+    LoopState:
+      type: object
+      required:
+        - status
+        - iteration
+        - mentorNotes
+        - history
+        - startedAt
+        - updatedAt
+      properties:
+        status:
+          type: string
+          enum:
+            - starting
+            - running_student
+            - waiting_for_student
+            - running_mentor
+            - waiting_for_mentor
+            - completed
+            - max_iterations
+            - blocker
+            - timeout
+            - error
+          example: running_student
+        iteration:
+          type: integer
+          minimum: 0
+          example: 3
+        mentorNotes:
+          type: array
+          items:
+            $ref: '#/components/schemas/MentorNote'
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/IterationRecord'
+        startedAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    MentorNote:
+      type: object
+      required:
+        - iteration
+        - question
+        - answer
+        - timestamp
+      properties:
+        iteration:
+          type: integer
+          example: 2
+        question:
+          type: string
+          example: "How do I install FastAPI?"
+        answer:
+          type: string
+          example: "FastAPI requires Python 3.7+. Ensure you're using the correct pip..."
+        timestamp:
+          type: string
+          format: date-time
+
+    IterationRecord:
+      type: object
+      required:
+        - iteration
+        - studentOutput
+        - startedAt
+        - endedAt
+      properties:
+        iteration:
+          type: integer
+          example: 1
+        studentOutput:
+          $ref: '#/components/schemas/StudentOutput'
+        mentorOutput:
+          type: string
+          nullable: true
+        startedAt:
+          type: string
+          format: date-time
+        endedAt:
+          type: string
+          format: date-time
