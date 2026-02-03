@@ -103,9 +103,13 @@ Strict clippy configuration requires these patterns:
 1. **Test struct initialization**: Use `Config { field: value, ..Default::default() }` not `let mut c = Config::default(); c.field = value;`
 2. **Empty strings**: Use `String::new()` not `"".to_string()`
 3. **No panic in tests**: Use `assert!(matches!(...), "message")` instead of `panic!()`
+4. **let-else over match**: Use `let Some(x) = opt else { continue };` instead of `match opt { Some(x) => x, None => continue }`
+5. **MSRV compliance**: Project MSRV is 1.75. Avoid `std::sync::LazyLock` (requires 1.80). Use `once_cell` crate or recreate resources.
+6. **Raw strings**: Prefer `r"..."` over `r#"..."#` when content has no quotes
 
 ## Recent Changes
 
+- 2026-02-03: Phase 4 complete - tutorial loading, image extraction, CLI integration
 - 2026-02-03: Phase 3 complete - config loading, validation, CLI integration
 - 2026-02-02: Initial planning phase for 001-smile-loop feature
 
