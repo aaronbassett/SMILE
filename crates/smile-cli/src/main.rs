@@ -250,7 +250,7 @@ async fn run_smile_loop(args: Args) -> anyhow::Result<()> {
         &state_path,
         &config,
         &container_manager,
-        &mut container,
+        &container,
     )
     .await;
 
@@ -302,27 +302,26 @@ async fn run_smile_loop(args: Args) -> anyhow::Result<()> {
 
 /// Runs the main Student-Mentor loop.
 ///
-/// This function polls the shared state waiting for callbacks from the
-/// agent wrappers via the HTTP API.
+/// This function orchestrates the Student-Mentor loop by:
+/// 1. Starting wrapper processes in the container when entering Running states
+/// 2. Transitioning to Waiting states after starting wrappers
+/// 3. Waiting for callbacks from wrappers via the HTTP API
+/// 4. Handling state transitions based on wrapper results
 async fn run_main_loop(
     loop_state: &Arc<Mutex<LoopState>>,
     state_path: &Path,
     config: &Config,
-    _container_manager: &ContainerManager,
-    _container: &mut smile_container::Container,
+    container_manager: &ContainerManager,
+    container: &smile_container::Container,
 ) -> anyhow::Result<()> {
     // Initialize the loop if starting fresh
     {
         let mut state = loop_state.lock().await;
         if state.status == LoopStatus::Starting {
             state.start()?;
-            state.start_waiting_for_student()?;
             state.save(state_path).await?;
-            tracing::info!(
-                iteration = state.iteration,
-                "Loop started, waiting for student"
-            );
-            println!("Iteration 1: Waiting for student agent...");
+            tracing::info!(iteration = state.iteration, "Loop started");
+            println!("Iteration 1: Starting student agent...");
         }
     }
 
@@ -344,7 +343,7 @@ async fn run_main_loop(
                 break;
             }
             () = sleep(poll_interval) => {
-                // Check current state
+                // Check current state and handle transitions
                 let (status, iteration, is_terminal) = {
                     let mut state = loop_state.lock().await;
 
@@ -357,6 +356,41 @@ async fn run_main_loop(
 
                     (state.status, state.iteration, state.is_terminal())
                 };
+
+                // Handle running states by invoking wrappers
+                match status {
+                    LoopStatus::RunningStudent => {
+                        // Invoke student wrapper in the container
+                        tracing::info!(iteration, "Invoking student wrapper");
+                        invoke_student_wrapper(container_manager, container, iteration).await?;
+
+                        // Transition to waiting state
+                        let mut state = loop_state.lock().await;
+                        state.start_waiting_for_student()?;
+                        state.save(state_path).await?;
+                        drop(state);
+                        tracing::info!(iteration, "Waiting for student callback");
+                    }
+                    LoopStatus::RunningMentor => {
+                        // Get the current question for the mentor
+                        let question = {
+                            let state = loop_state.lock().await;
+                            state.current_question.clone()
+                        };
+
+                        // Invoke mentor wrapper in the container
+                        tracing::info!(iteration, "Invoking mentor wrapper");
+                        invoke_mentor_wrapper(container_manager, container, question.as_deref()).await?;
+
+                        // Transition to waiting state
+                        let mut state = loop_state.lock().await;
+                        state.start_waiting_for_mentor()?;
+                        state.save(state_path).await?;
+                        drop(state);
+                        tracing::info!(iteration, "Waiting for mentor callback");
+                    }
+                    _ => {}
+                }
 
                 // Print status changes
                 if status != last_status {
@@ -387,6 +421,89 @@ async fn run_main_loop(
         }
     }
 
+    Ok(())
+}
+
+/// Invokes the student wrapper inside the container.
+///
+/// The student wrapper is invoked as a Python module that:
+/// 1. Loads the tutorial and config from mounted volumes
+/// 2. Invokes the LLM CLI to process the tutorial
+/// 3. Reports results back to the orchestrator via HTTP callback
+async fn invoke_student_wrapper(
+    container_manager: &ContainerManager,
+    container: &smile_container::Container,
+    iteration: u32,
+) -> anyhow::Result<()> {
+    let cmd = vec!["python", "-m", "smile_wrappers.student"];
+
+    tracing::debug!(iteration, cmd = ?cmd, "Executing student wrapper");
+
+    // Set the iteration as an environment variable via a shell command
+    let shell_cmd = format!("SMILE_ITERATION={iteration} python -m smile_wrappers.student");
+    let exec_cmd = vec!["sh", "-c", &shell_cmd];
+
+    let output = container_manager
+        .exec_in_container(container, exec_cmd)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to execute student wrapper: {e}"))?;
+
+    if !output.success() {
+        tracing::warn!(
+            exit_code = output.exit_code,
+            output = %output.output,
+            "Student wrapper exited with non-zero code"
+        );
+        // Exit code 42 means stop was requested, which is expected
+        if output.exit_code != 42 {
+            return Err(anyhow::anyhow!(
+                "Student wrapper failed with exit code {}: {}",
+                output.exit_code,
+                output.output
+            ));
+        }
+    }
+
+    tracing::debug!(output = %output.output, "Student wrapper completed");
+    Ok(())
+}
+
+/// Invokes the mentor wrapper inside the container.
+///
+/// The mentor wrapper is invoked as a Python module that:
+/// 1. Loads the stuck context from the orchestrator
+/// 2. Invokes the LLM CLI to generate guidance
+/// 3. Reports results back to the orchestrator via HTTP callback
+async fn invoke_mentor_wrapper(
+    container_manager: &ContainerManager,
+    container: &smile_container::Container,
+    question: Option<&str>,
+) -> anyhow::Result<()> {
+    tracing::debug!(question = ?question, "Executing mentor wrapper");
+
+    // The mentor wrapper reads stuck context from a file, so we just invoke it
+    let output = container_manager
+        .exec_in_container(container, vec!["python", "-m", "smile_wrappers.mentor"])
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to execute mentor wrapper: {e}"))?;
+
+    if !output.success() {
+        tracing::warn!(
+            exit_code = output.exit_code,
+            output = %output.output,
+            "Mentor wrapper exited with non-zero code"
+        );
+        // Exit code 42 means stop was requested, which is expected
+        if output.exit_code != 42 {
+            return Err(anyhow::anyhow!(
+                "Mentor wrapper failed with exit code {}: {}",
+                output.exit_code,
+                output.output
+            ));
+        }
+    }
+
+    tracing::debug!(output = %output.output, "Mentor wrapper completed");
     Ok(())
 }
 

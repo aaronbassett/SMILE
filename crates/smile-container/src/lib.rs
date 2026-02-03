@@ -54,6 +54,10 @@ pub enum ContainerError {
     #[error("failed to remove container: {0}")]
     RemoveFailed(String),
 
+    /// Failed to execute command in container.
+    #[error("failed to execute command in container: {0}")]
+    ExecFailed(String),
+
     /// Container not found.
     #[error("container not found: {0}")]
     NotFound(String),
@@ -156,6 +160,32 @@ pub struct Container {
     pub mounts: Vec<Mount>,
     /// Timestamp when the container was created.
     pub created_at: DateTime<Utc>,
+}
+
+/// Output from a command executed inside a container.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecOutput {
+    /// Combined stdout and stderr output.
+    pub output: String,
+    /// Exit code of the command.
+    pub exit_code: i64,
+}
+
+impl ExecOutput {
+    /// Creates a new `ExecOutput`.
+    #[must_use]
+    pub fn new(output: impl Into<String>, exit_code: i64) -> Self {
+        Self {
+            output: output.into(),
+            exit_code,
+        }
+    }
+
+    /// Returns `true` if the command exited with code 0.
+    #[must_use]
+    pub const fn success(&self) -> bool {
+        self.exit_code == 0
+    }
 }
 
 impl Container {
