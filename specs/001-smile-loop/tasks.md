@@ -71,37 +71,37 @@ Project initialization and scaffolding.
 Shared infrastructure required by all user stories.
 
 ### Phase Start
-- [ ] T016 [GIT] Verify working tree is clean before starting Phase 2
-- [ ] T017 [GIT] Pull and rebase on origin/main if needed
-- [ ] T018 Create retro/P2.md for this phase
-- [ ] T019 [GIT] Commit: initialize phase 2 retro
+- [x] T016 [GIT] Verify working tree is clean before starting Phase 2
+- [x] T017 [GIT] Pull and rebase on origin/main if needed
+- [x] T018 Create retro/P2.md for this phase
+- [x] T019 [GIT] Commit: initialize phase 2 retro
 
 ### Implementation
 
 #### Error Types (shared across crates)
-- [ ] T020 [P] Create SmileError enum with variants in crates/smile-orchestrator/src/error.rs (use devs:rust-dev agent)
-- [ ] T021 [GIT] Commit: add error types
+- [x] T020 [P] Create SmileError enum with variants in crates/smile-orchestrator/src/error.rs (use devs:rust-dev agent)
+- [x] T021 [GIT] Commit: add error types
 
 #### Configuration (US2 foundation)
-- [ ] T022 [P] Implement Config struct with serde defaults in crates/smile-orchestrator/src/config.rs (use devs:rust-dev agent)
-- [ ] T023 [P] Implement StudentBehavior struct in crates/smile-orchestrator/src/config.rs (use devs:rust-dev agent)
-- [ ] T024 [P] Implement LlmProvider and PatienceLevel enums in crates/smile-orchestrator/src/config.rs (use devs:rust-dev agent)
-- [ ] T025 [GIT] Commit: add configuration types
+- [x] T022 [P] Implement Config struct with serde defaults in crates/smile-orchestrator/src/config.rs (use devs:rust-dev agent)
+- [x] T023 [P] Implement StudentBehavior struct in crates/smile-orchestrator/src/config.rs (use devs:rust-dev agent)
+- [x] T024 [P] Implement LlmProvider and PatienceLevel enums in crates/smile-orchestrator/src/config.rs (use devs:rust-dev agent)
+- [x] T025 [GIT] Commit: add configuration types
 
 #### Python Output Models (shared by wrappers)
-- [ ] T026 [P] Implement StudentOutput pydantic model in python/smile_wrappers/output.py (use devs:python-expert agent)
-- [ ] T027 [P] Implement Config pydantic model in python/smile_wrappers/config.py (use devs:python-expert agent)
-- [ ] T028 [GIT] Commit: add Python output and config models
+- [x] T026 [P] Implement StudentOutput pydantic model in python/smile_wrappers/output.py (use devs:python-expert agent)
+- [x] T027 [P] Implement Config pydantic model in python/smile_wrappers/config.py (use devs:python-expert agent)
+- [x] T028 [GIT] Commit: add Python output and config models
 
 #### CLI Skeleton
-- [ ] T029 Implement CLI arg parsing with clap in crates/smile-cli/src/main.rs (use devs:rust-dev agent)
-- [ ] T030 [GIT] Commit: add CLI skeleton
+- [x] T029 Implement CLI arg parsing with clap in crates/smile-cli/src/main.rs (use devs:rust-dev agent)
+- [x] T030 [GIT] Commit: add CLI skeleton
 
 ### Phase Completion
-- [ ] T031 Run /sdd:map incremental for Phase 2 changes
-- [ ] T032 [GIT] Commit: update codebase documents for phase 2
-- [ ] T033 Review retro/P2.md and extract critical learnings to CLAUDE.md (conservative)
-- [ ] T034 [GIT] Commit: finalize phase 2 retro
+- [x] T031 Run /sdd:map incremental for Phase 2 changes (skipped - not configured)
+- [x] T032 [GIT] Commit: update codebase documents for phase 2
+- [x] T033 Review retro/P2.md and extract critical learnings to CLAUDE.md (conservative)
+- [x] T034 [GIT] Commit: finalize phase 2 retro
 - [ ] T035 [GIT] Push branch to origin (ensure pre-push hooks pass)
 - [ ] T036 [GIT] Create/update PR to main with phase summary
 - [ ] T037 [GIT] Verify all CI checks pass
