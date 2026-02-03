@@ -48,6 +48,9 @@ anyhow = "1.0"
 # Async utilities
 futures = "0.3"
 
+# Regex
+regex = "1.10"
+
 # Testing
 tokio-test = "0.4"
 

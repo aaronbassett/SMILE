@@ -176,6 +176,99 @@ impl Tutorial {
     pub fn base_dir(&self) -> Option<&Path> {
         self.path.parent()
     }
+
+    /// Extracts and loads all image references from the tutorial markdown.
+    ///
+    /// Parses the markdown content for image syntax (`![alt](path)`) and
+    /// resolves each path relative to the tutorial file's directory.
+    ///
+    /// Only images with supported formats (PNG, JPG, GIF, SVG) are loaded.
+    /// Missing images or unsupported formats are silently skipped.
+    ///
+    /// This method mutates the tutorial in place, populating the `images` field.
+    pub fn extract_images(&mut self) {
+        let base_dir = match self.base_dir() {
+            Some(dir) => dir.to_path_buf(),
+            None => return,
+        };
+
+        let references = extract_image_references(&self.content);
+        let mut images = Vec::new();
+
+        for reference in references {
+            // Skip URLs (http://, https://, data:, etc.)
+            if reference.starts_with("http://")
+                || reference.starts_with("https://")
+                || reference.starts_with("data:")
+            {
+                continue;
+            }
+
+            // Resolve the path relative to the tutorial directory
+            let resolved_path = base_dir.join(&reference);
+
+            // Check if it's a supported format
+            let Some(format) = ImageFormat::from_path(&resolved_path) else {
+                continue; // Skip unsupported formats
+            };
+
+            // Try to load the image data
+            let Ok(data) = std::fs::read(&resolved_path) else {
+                continue; // Skip missing images
+            };
+
+            // Canonicalize the path for consistent representation
+            let resolved_path = std::fs::canonicalize(&resolved_path).unwrap_or(resolved_path);
+
+            images.push(TutorialImage {
+                reference,
+                resolved_path,
+                format,
+                data,
+            });
+        }
+
+        self.images = images;
+    }
+
+    /// Loads a tutorial and extracts all images in one operation.
+    ///
+    /// This is a convenience method that combines [`Tutorial::load`] and
+    /// [`Tutorial::extract_images`].
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Tutorial::load`].
+    pub fn load_with_images(path: impl AsRef<Path>) -> Result<Self> {
+        let mut tutorial = Self::load(path)?;
+        tutorial.extract_images();
+        Ok(tutorial)
+    }
+}
+
+/// Extracts all image reference paths from markdown content.
+///
+/// Parses markdown image syntax: `![alt text](path)` and `![](path)`
+/// Returns a vector of the path strings (not including alt text).
+fn extract_image_references(content: &str) -> Vec<String> {
+    use regex::Regex;
+
+    // Regex to match markdown image syntax: ![alt](path)
+    // Captures the path portion in group 1
+    // Pattern explanation:
+    // - `!\[` - literal "!["
+    // - `[^\]]*` - any chars except "]" (alt text)
+    // - `\]\(` - literal "]("
+    // - `([^)\s]+)` - capture group: path (no parens or whitespace)
+    // - `(?:\s+[^)]*)?` - optional title after whitespace
+    // - `\)` - closing paren
+    let Ok(re) = Regex::new(r"!\[[^\]]*\]\(([^)\s]+)(?:\s+[^)]*)?\)") else {
+        return Vec::new();
+    };
+
+    re.captures_iter(content)
+        .filter_map(|cap| cap.get(1).map(|m| m.as_str().to_string()))
+        .collect()
 }
 
 #[cfg(test)]
@@ -427,5 +520,145 @@ mod tests {
         let base_dir = tutorial.base_dir();
         assert!(base_dir.is_some());
         assert_eq!(base_dir.unwrap(), Path::new("/"));
+    }
+
+    #[test]
+    fn test_extract_image_references_basic() {
+        let content = r"
+# Tutorial
+
+Here's an image:
+![Screenshot](./images/screenshot.png)
+
+And another:
+![](diagram.jpg)
+";
+        let refs = extract_image_references(content);
+        assert_eq!(refs.len(), 2);
+        assert_eq!(refs[0], "./images/screenshot.png");
+        assert_eq!(refs[1], "diagram.jpg");
+    }
+
+    #[test]
+    fn test_extract_image_references_with_title() {
+        let content = r#"![Alt text](image.png "Title")"#;
+        let refs = extract_image_references(content);
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0], "image.png");
+    }
+
+    #[test]
+    fn test_extract_image_references_urls() {
+        let content = r"
+![Remote](https://example.com/image.png)
+![Local](./local.png)
+![Data](data:image/png;base64,abc)
+";
+        let refs = extract_image_references(content);
+        assert_eq!(refs.len(), 3);
+        // URLs are extracted but filtered out during loading
+        assert!(refs.contains(&"https://example.com/image.png".to_string()));
+        assert!(refs.contains(&"./local.png".to_string()));
+        assert!(refs.contains(&"data:image/png;base64,abc".to_string()));
+    }
+
+    #[test]
+    fn test_extract_image_references_no_images() {
+        let content = "# Tutorial\n\nJust text, no images.";
+        let refs = extract_image_references(content);
+        assert!(refs.is_empty());
+    }
+
+    #[test]
+    fn test_extract_image_references_multiple_per_line() {
+        let content = r"![A](a.png) Some text ![B](b.jpg)";
+        let refs = extract_image_references(content);
+        assert_eq!(refs.len(), 2);
+        assert_eq!(refs[0], "a.png");
+        assert_eq!(refs[1], "b.jpg");
+    }
+
+    #[test]
+    fn test_extract_images_with_files() {
+        use std::io::Write;
+
+        // Create a temp directory structure
+        let temp_dir = std::env::temp_dir().join("smile_test_images");
+        let images_dir = temp_dir.join("images");
+        std::fs::create_dir_all(&images_dir).unwrap();
+
+        // Create a tutorial file
+        let tutorial_path = temp_dir.join("tutorial.md");
+        let content = r"
+# My Tutorial
+
+![Screenshot](images/screen.png)
+![Diagram](images/diagram.svg)
+![Missing](images/missing.gif)
+![Remote](https://example.com/remote.png)
+";
+        let mut file = std::fs::File::create(&tutorial_path).unwrap();
+        file.write_all(content.as_bytes()).unwrap();
+
+        // Create image files (with minimal valid content)
+        let png_path = images_dir.join("screen.png");
+        std::fs::write(&png_path, [0x89, 0x50, 0x4E, 0x47]).unwrap(); // PNG magic
+
+        let svg_path = images_dir.join("diagram.svg");
+        std::fs::write(&svg_path, b"<svg></svg>").unwrap();
+
+        // Load tutorial with images
+        let tutorial = Tutorial::load_with_images(&tutorial_path).unwrap();
+
+        // Should have 2 images (missing.gif and remote URL are skipped)
+        assert_eq!(tutorial.images.len(), 2);
+
+        // Check PNG image
+        let png_img = tutorial
+            .images
+            .iter()
+            .find(|i| i.reference == "images/screen.png");
+        assert!(png_img.is_some());
+        let png_img = png_img.unwrap();
+        assert_eq!(png_img.format, ImageFormat::Png);
+        assert_eq!(png_img.data, vec![0x89, 0x50, 0x4E, 0x47]);
+
+        // Check SVG image
+        let svg_img = tutorial
+            .images
+            .iter()
+            .find(|i| i.reference == "images/diagram.svg");
+        assert!(svg_img.is_some());
+        let svg_img = svg_img.unwrap();
+        assert_eq!(svg_img.format, ImageFormat::Svg);
+        assert_eq!(svg_img.data, b"<svg></svg>");
+
+        // Cleanup
+        std::fs::remove_dir_all(&temp_dir).ok();
+    }
+
+    #[test]
+    fn test_extract_images_unsupported_format() {
+        use std::io::Write;
+
+        let temp_dir = std::env::temp_dir().join("smile_test_unsupported");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let tutorial_path = temp_dir.join("tutorial.md");
+        let content = "![Image](image.bmp)";
+        let mut file = std::fs::File::create(&tutorial_path).unwrap();
+        file.write_all(content.as_bytes()).unwrap();
+
+        // Create a BMP file (unsupported format)
+        let bmp_path = temp_dir.join("image.bmp");
+        std::fs::write(&bmp_path, b"BM").unwrap();
+
+        let tutorial = Tutorial::load_with_images(&tutorial_path).unwrap();
+
+        // BMP is not supported, so no images should be loaded
+        assert!(tutorial.images.is_empty());
+
+        // Cleanup
+        std::fs::remove_dir_all(&temp_dir).ok();
     }
 }
