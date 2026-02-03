@@ -11,8 +11,8 @@ use std::time::Duration;
 use clap::Parser;
 use smile_container::{ContainerManager, CreateContainerOptions, Mount};
 use smile_orchestrator::{
-    create_router, AppState, Config, IterationRecord, LoopState, LoopStatus, MentorNote, StateLock,
-    StudentStatus, Tutorial,
+    create_router, AppState, Config, EventBroadcaster, IterationRecord, LoopState, LoopStatus,
+    MentorNote, StateLock, StudentStatus, Tutorial,
 };
 use smile_report::{
     json::JsonGenerator, IterationInput, MarkdownGenerator, MentorNoteInput, ReportGenerator,
@@ -220,6 +220,7 @@ async fn run_smile_loop(args: Args) -> anyhow::Result<()> {
     let app_state = AppState {
         config: config.clone(),
         loop_state: Arc::clone(&loop_state),
+        broadcaster: EventBroadcaster::default(),
     };
     let router = create_router(app_state);
 
