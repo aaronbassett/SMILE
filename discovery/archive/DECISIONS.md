@@ -1,0 +1,183 @@
+# Decision Log: smile-loop
+
+*Chronological record of all decisions made during discovery.*
+
+---
+
+[Decision entries will be added as decisions are made]
+
+## D1: V1 scope: Report only, no PR generation — 2026-02-02
+
+**Context**: Discussed whether system should generate PRs with tutorial edits or just produce reports
+
+**Question**: [Question not provided]
+
+**Options Considered**:
+[Options not provided]
+
+**Decision**: First iteration produces comprehensive report only; PR generation deferred to future version
+
+**Rationale**: Reduces complexity - content editing and git operations are hard problems that can be tackled after core loop is validated
+
+**Implications**:
+[Implications not provided]
+
+**Stories Affected**: [Stories not specified]
+
+**Related Questions**: [Questions not specified]
+
+---
+
+## D2: Dependency handling: Container base + tutorial-driven — 2026-02-02
+
+**Context**: Discussed how tutorial dependencies are managed in the execution environment
+
+**Question**: [Question not provided]
+
+**Options Considered**:
+[Options not provided]
+
+**Decision**: Container ships with common languages (Python, Node, etc.); additional dependencies must be documented in tutorial; Student detects and installs as instructed
+
+**Rationale**: This approach tests whether tutorials properly document their requirements - if a dependency is missing from tutorial instructions, that's a gap to report
+
+**Implications**:
+[Implications not provided]
+
+**Stories Affected**: [Stories not specified]
+
+**Related Questions**: [Questions not specified]
+
+---
+
+## D3: Execution model: Fresh start each iteration with accumulated notes — 2026-02-02
+
+**Context**: Discussed how Student handles multiple iterations and memory
+
+**Question**: [Question not provided]
+
+**Options Considered**:
+[Options not provided]
+
+**Decision**: Student restarts tutorial from scratch each iteration; receives original tutorial plus accumulated text notes from all previous Mentor consultations; no persistent memory beyond notes
+
+**Rationale**: Clean isolation per iteration - each run is a complete test of whether tutorial + notes is sufficient; simplifies state management and makes results reproducible
+
+**Implications**:
+[Implications not provided]
+
+**Stories Affected**: [Stories not specified]
+
+**Related Questions**: [Questions not specified]
+
+---
+
+## D4: Stuck detection is prompt-based, not programmatic — 2026-02-02
+
+**Context**: Discussed how stuck triggers work - whether code detects stuck states or the Student self-reports
+
+**Question**: [Question not provided]
+
+**Options Considered**:
+[Options not provided]
+
+**Decision**: Stuck detection is part of the Student's prompt instructions, not programmatic code; Student is instructed when to ask for help
+
+**Rationale**: More flexible and LLM-native; allows nuanced judgment about when to escalate rather than rigid pattern matching
+
+**Implications**:
+[Implications not provided]
+
+**Stories Affected**: 1, 5
+
+**Related Questions**: [Questions not specified]
+
+---
+
+## D5: LLM providers accessed via their CLI tools — 2026-02-02
+
+**Context**: Discussed how SMILE interacts with different LLM providers
+
+**Question**: [Question not provided]
+
+**Options Considered**:
+[Options not provided]
+
+**Decision**: Use provider CLI tools (claude -p, etc.) rather than direct API integration; credentials via environment variables
+
+**Rationale**: Avoids implementing API wrappers for each provider; leverages existing mature CLI tools; simpler dependency management
+
+**Implications**:
+[Implications not provided]
+
+**Stories Affected**: 1, 4, 6
+
+**Related Questions**: [Questions not specified]
+
+---
+
+## D6: Student receives raw markdown, handles interpretation — 2026-02-02
+
+**Context**: Discussed whether system should pre-parse tutorial structure or let LLM handle it
+
+**Question**: [Question not provided]
+
+**Options Considered**:
+[Options not provided]
+
+**Decision**: No preprocessing of tutorial content; Student agent receives raw markdown and infers structure, steps, and code blocks; frontmatter is ignored by Student
+
+**Rationale**: Keeps system simple; leverages LLM's ability to understand natural prose; avoids brittle parsing rules that constrain tutorial format
+
+**Implications**:
+[Implications not provided]
+
+**Stories Affected**: 2, 4
+
+**Related Questions**: [Questions not specified]
+
+---
+
+## D7: Container reset between iterations for clean slate — 2026-02-02
+
+**Context**: Discussed whether container persists across iterations or resets
+
+**Question**: [Question not provided]
+
+**Options Considered**:
+[Options not provided]
+
+**Decision**: Container is reset between iterations to give Student a clean slate; use fastest mechanism that achieves this (likely fresh container from same image)
+
+**Rationale**: Ensures each iteration is reproducible and isolated; Student cannot rely on side effects from previous attempts; aligns with 'fresh start + mentor notes' model
+
+**Implications**:
+[Implications not provided]
+
+**Stories Affected**: 3, 7
+
+**Related Questions**: [Questions not specified]
+
+---
+
+## D8: Student outputs structured JSON for wrapper parsing — 2026-02-02
+
+**Context**: Discussed how Student communicates results to wrapper
+
+**Question**: [Question not provided]
+
+**Options Considered**:
+[Options not provided]
+
+**Decision**: Student outputs structured JSON with status, currentStep, attemptedActions, problem, and questionForMentor fields; wrapper parses stdout
+
+**Rationale**: Structured output enables reliable parsing and rich information capture for the report
+
+**Implications**:
+[Implications not provided]
+
+**Stories Affected**: 4, 7, 9
+
+**Related Questions**: [Questions not specified]
+
+---
