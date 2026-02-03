@@ -32,6 +32,67 @@ const fn default_version() -> u32 {
 }
 
 // ============================================================================
+// TerminationReason
+// ============================================================================
+
+/// Reason why the SMILE loop terminated.
+///
+/// Provides detailed information about why the loop stopped, useful for
+/// reporting and debugging.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TerminationReason {
+    /// Tutorial completed successfully.
+    Completed,
+    /// Maximum iteration limit was reached.
+    MaxIterations {
+        /// The iteration count when termination occurred.
+        reached: u32,
+        /// The configured maximum iterations limit.
+        limit: u32,
+    },
+    /// Global timeout was exceeded.
+    Timeout {
+        /// Elapsed time in seconds when termination occurred.
+        elapsed_secs: u64,
+        /// The configured timeout limit in seconds.
+        limit_secs: u32,
+    },
+    /// Student encountered an unresolvable blocker.
+    Blocker {
+        /// Description of the blocker.
+        reason: String,
+    },
+    /// Unrecoverable error occurred.
+    Error {
+        /// Description of the error.
+        message: String,
+    },
+}
+
+impl std::fmt::Display for TerminationReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Completed => write!(f, "Tutorial completed successfully"),
+            Self::MaxIterations { reached, limit } => {
+                write!(f, "Maximum iterations reached ({reached}/{limit})")
+            }
+            Self::Timeout {
+                elapsed_secs,
+                limit_secs,
+            } => {
+                write!(f, "Timeout exceeded ({elapsed_secs}s/{limit_secs}s)")
+            }
+            Self::Blocker { reason } => {
+                write!(f, "Unresolvable blocker: {reason}")
+            }
+            Self::Error { message } => {
+                write!(f, "Error: {message}")
+            }
+        }
+    }
+}
+
+// ============================================================================
 // LoopStatus
 // ============================================================================
 
@@ -460,6 +521,224 @@ impl LoopState {
     #[must_use]
     pub fn elapsed(&self) -> chrono::Duration {
         Utc::now() - self.started_at
+    }
+
+    // ========================================================================
+    // Termination Condition Methods
+    // ========================================================================
+
+    /// Check if the loop has exceeded the global timeout.
+    ///
+    /// Returns `true` if the elapsed time since `started_at` is greater than
+    /// or equal to `timeout_seconds`.
+    ///
+    /// # Arguments
+    ///
+    /// * `timeout_seconds` - The maximum allowed duration in seconds
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use smile_orchestrator::LoopState;
+    ///
+    /// let state = LoopState::new();
+    /// // Just created, so timeout should not be triggered
+    /// assert!(!state.check_timeout(60));
+    /// ```
+    #[must_use]
+    pub fn check_timeout(&self, timeout_seconds: u32) -> bool {
+        let elapsed_secs = self.elapsed().num_seconds();
+        // Handle negative durations (clock skew) by treating them as 0
+        let elapsed_secs = u64::try_from(elapsed_secs).unwrap_or(0);
+        elapsed_secs >= u64::from(timeout_seconds)
+    }
+
+    /// Check if the loop has reached the maximum iterations.
+    ///
+    /// Returns `true` if the current `iteration` count is greater than or
+    /// equal to `max_iterations`.
+    ///
+    /// # Arguments
+    ///
+    /// * `max_iterations` - The maximum number of iterations allowed
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use smile_orchestrator::LoopState;
+    ///
+    /// let mut state = LoopState::new();
+    /// assert!(!state.check_max_iterations(10)); // iteration = 0
+    ///
+    /// state.iteration = 10;
+    /// assert!(state.check_max_iterations(10)); // at limit
+    ///
+    /// state.iteration = 11;
+    /// assert!(state.check_max_iterations(10)); // over limit
+    /// ```
+    #[must_use]
+    pub const fn check_max_iterations(&self, max_iterations: u32) -> bool {
+        self.iteration >= max_iterations
+    }
+
+    /// Check all termination conditions and transition state if needed.
+    ///
+    /// This is the main check to call before each iteration. It checks:
+    /// 1. If the loop is already in a terminal state
+    /// 2. If the global timeout has been exceeded
+    /// 3. If the maximum iterations have been reached
+    ///
+    /// If a termination condition is met, the state is transitioned to the
+    /// appropriate terminal status and that status is returned.
+    ///
+    /// # Arguments
+    ///
+    /// * `max_iterations` - The maximum number of iterations allowed
+    /// * `timeout_seconds` - The maximum allowed duration in seconds
+    ///
+    /// # Returns
+    ///
+    /// * `Some(LoopStatus)` - If a terminal condition was reached
+    /// * `None` - If the loop should continue
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use smile_orchestrator::{LoopState, LoopStatus};
+    ///
+    /// let mut state = LoopState::new();
+    /// // Fresh state, no termination
+    /// assert!(state.check_termination(10, 3600).is_none());
+    ///
+    /// // Simulate being at max iterations
+    /// state.iteration = 10;
+    /// let result = state.check_termination(10, 3600);
+    /// assert_eq!(result, Some(LoopStatus::MaxIterations));
+    /// assert_eq!(state.status, LoopStatus::MaxIterations);
+    /// ```
+    pub fn check_termination(
+        &mut self,
+        max_iterations: u32,
+        timeout_seconds: u32,
+    ) -> Option<LoopStatus> {
+        // Already terminal - return current status
+        if self.is_terminal() {
+            return Some(self.status);
+        }
+
+        // Check timeout first (takes priority over max iterations)
+        if self.check_timeout(timeout_seconds) {
+            // Use the timeout() method to properly transition
+            // This will fail if already terminal, but we checked above
+            let _ = self.timeout();
+            return Some(LoopStatus::Timeout);
+        }
+
+        // Check max iterations
+        if self.check_max_iterations(max_iterations) {
+            self.status = LoopStatus::MaxIterations;
+            self.touch();
+            return Some(LoopStatus::MaxIterations);
+        }
+
+        None
+    }
+
+    /// Returns the reason why the loop terminated.
+    ///
+    /// This method extracts detailed information about the termination,
+    /// including specific limits and values where applicable.
+    ///
+    /// Returns `None` if the loop is not in a terminal state.
+    ///
+    /// # Arguments
+    ///
+    /// * `max_iterations` - The configured maximum iterations (for context)
+    /// * `timeout_seconds` - The configured timeout in seconds (for context)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use smile_orchestrator::{LoopState, LoopStatus, TerminationReason};
+    ///
+    /// let mut state = LoopState::new();
+    /// assert!(state.termination_reason(10, 3600).is_none());
+    ///
+    /// state.status = LoopStatus::Completed;
+    /// let reason = state.termination_reason(10, 3600);
+    /// assert_eq!(reason, Some(TerminationReason::Completed));
+    /// ```
+    #[must_use]
+    pub fn termination_reason(
+        &self,
+        max_iterations: u32,
+        timeout_seconds: u32,
+    ) -> Option<TerminationReason> {
+        match self.status {
+            LoopStatus::Completed => Some(TerminationReason::Completed),
+            LoopStatus::MaxIterations => Some(TerminationReason::MaxIterations {
+                reached: self.iteration,
+                limit: max_iterations,
+            }),
+            LoopStatus::Timeout => {
+                let elapsed_secs = u64::try_from(self.elapsed().num_seconds()).unwrap_or(0);
+                Some(TerminationReason::Timeout {
+                    elapsed_secs,
+                    limit_secs: timeout_seconds,
+                })
+            }
+            LoopStatus::Blocker => {
+                // Try to extract the reason from the last history entry
+                let reason = self
+                    .history
+                    .last()
+                    .and_then(|record| record.student_output.reason.clone())
+                    .unwrap_or_else(|| "Unknown blocker".to_string());
+                Some(TerminationReason::Blocker { reason })
+            }
+            LoopStatus::Error => {
+                let message = self
+                    .error_message
+                    .clone()
+                    .unwrap_or_else(|| "Unknown error".to_string());
+                Some(TerminationReason::Error { message })
+            }
+            // Non-terminal states
+            LoopStatus::Starting
+            | LoopStatus::RunningStudent
+            | LoopStatus::WaitingForStudent
+            | LoopStatus::RunningMentor
+            | LoopStatus::WaitingForMentor => None,
+        }
+    }
+
+    /// Returns a human-readable summary of how the loop terminated.
+    ///
+    /// Only valid when `is_terminal()` is true. Returns `None` for
+    /// non-terminal states.
+    ///
+    /// # Arguments
+    ///
+    /// * `max_iterations` - The configured maximum iterations (for context)
+    /// * `timeout_seconds` - The configured timeout in seconds (for context)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use smile_orchestrator::{LoopState, LoopStatus};
+    ///
+    /// let mut state = LoopState::new();
+    /// assert!(state.termination_summary(10, 3600).is_none());
+    ///
+    /// state.status = LoopStatus::Completed;
+    /// let summary = state.termination_summary(10, 3600);
+    /// assert!(summary.is_some());
+    /// assert!(summary.unwrap().contains("completed successfully"));
+    /// ```
+    #[must_use]
+    pub fn termination_summary(&self, max_iterations: u32, timeout_seconds: u32) -> Option<String> {
+        self.termination_reason(max_iterations, timeout_seconds)
+            .map(|reason| reason.to_string())
     }
 
     // ========================================================================
@@ -2311,5 +2590,448 @@ mod tests {
 
         // Cleanup
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    // ------------------------------------------------------------------------
+    // Termination condition tests
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_check_timeout_not_exceeded() {
+        let state = LoopState::new();
+        // Just created, timeout should not be triggered for any reasonable timeout
+        assert!(!state.check_timeout(1));
+        assert!(!state.check_timeout(60));
+        assert!(!state.check_timeout(3600));
+    }
+
+    #[test]
+    fn test_check_timeout_with_zero() {
+        let state = LoopState::new();
+        // Zero timeout should immediately trigger (elapsed >= 0)
+        assert!(state.check_timeout(0));
+    }
+
+    #[test]
+    fn test_check_timeout_with_past_start_time() {
+        use chrono::Duration;
+
+        let mut state = LoopState::new();
+        // Set started_at to 10 seconds ago
+        state.started_at = Utc::now() - Duration::seconds(10);
+
+        assert!(!state.check_timeout(60)); // 10s < 60s
+        assert!(!state.check_timeout(11)); // 10s < 11s
+        assert!(state.check_timeout(10)); // 10s >= 10s
+        assert!(state.check_timeout(5)); // 10s >= 5s
+    }
+
+    #[test]
+    fn test_check_max_iterations_not_reached() {
+        let mut state = LoopState::new();
+        assert!(!state.check_max_iterations(1)); // 0 < 1
+        assert!(!state.check_max_iterations(10)); // 0 < 10
+
+        state.iteration = 5;
+        assert!(!state.check_max_iterations(10)); // 5 < 10
+        assert!(!state.check_max_iterations(6)); // 5 < 6
+    }
+
+    #[test]
+    fn test_check_max_iterations_at_boundary() {
+        let mut state = LoopState::new();
+
+        state.iteration = 10;
+        assert!(state.check_max_iterations(10)); // 10 >= 10 (at boundary)
+        assert!(!state.check_max_iterations(11)); // 10 < 11
+    }
+
+    #[test]
+    fn test_check_max_iterations_exceeded() {
+        let mut state = LoopState::new();
+        state.iteration = 15;
+
+        assert!(state.check_max_iterations(10)); // 15 >= 10
+        assert!(state.check_max_iterations(15)); // 15 >= 15
+        assert!(!state.check_max_iterations(16)); // 15 < 16
+    }
+
+    #[test]
+    fn test_check_termination_no_termination() {
+        let mut state = LoopState::new();
+        // Fresh state should not trigger termination
+        let result = state.check_termination(10, 3600);
+        assert!(result.is_none());
+        assert_eq!(state.status, LoopStatus::Starting);
+    }
+
+    #[test]
+    fn test_check_termination_already_terminal() {
+        let mut state = LoopState::new();
+        state.status = LoopStatus::Completed;
+
+        let result = state.check_termination(10, 3600);
+        assert_eq!(result, Some(LoopStatus::Completed));
+        assert_eq!(state.status, LoopStatus::Completed);
+    }
+
+    #[test]
+    fn test_check_termination_triggers_timeout() {
+        use chrono::Duration;
+
+        let mut state = LoopState::new();
+        state.start().unwrap();
+        // Set started_at to 100 seconds ago
+        state.started_at = Utc::now() - Duration::seconds(100);
+
+        let result = state.check_termination(10, 60); // 100s >= 60s
+        assert_eq!(result, Some(LoopStatus::Timeout));
+        assert_eq!(state.status, LoopStatus::Timeout);
+    }
+
+    #[test]
+    fn test_check_termination_triggers_max_iterations() {
+        let mut state = LoopState::new();
+        state.start().unwrap();
+        state.iteration = 10;
+
+        let result = state.check_termination(10, 3600);
+        assert_eq!(result, Some(LoopStatus::MaxIterations));
+        assert_eq!(state.status, LoopStatus::MaxIterations);
+    }
+
+    #[test]
+    fn test_check_termination_timeout_takes_priority_over_max_iterations() {
+        use chrono::Duration;
+
+        let mut state = LoopState::new();
+        state.start().unwrap();
+        state.iteration = 10;
+        // Set started_at to 100 seconds ago
+        state.started_at = Utc::now() - Duration::seconds(100);
+
+        // Both conditions met, but timeout should be checked first
+        let result = state.check_termination(10, 60);
+        assert_eq!(result, Some(LoopStatus::Timeout));
+        assert_eq!(state.status, LoopStatus::Timeout);
+    }
+
+    #[test]
+    fn test_check_termination_updates_timestamp() {
+        let mut state = LoopState::new();
+        state.start().unwrap();
+        let original_updated_at = state.updated_at;
+
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        state.iteration = 10;
+        state.check_termination(10, 3600);
+
+        assert!(state.updated_at > original_updated_at);
+    }
+
+    // ------------------------------------------------------------------------
+    // TerminationReason tests
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_termination_reason_display() {
+        assert_eq!(
+            TerminationReason::Completed.to_string(),
+            "Tutorial completed successfully"
+        );
+
+        assert_eq!(
+            TerminationReason::MaxIterations {
+                reached: 10,
+                limit: 10
+            }
+            .to_string(),
+            "Maximum iterations reached (10/10)"
+        );
+
+        assert_eq!(
+            TerminationReason::Timeout {
+                elapsed_secs: 120,
+                limit_secs: 60
+            }
+            .to_string(),
+            "Timeout exceeded (120s/60s)"
+        );
+
+        assert_eq!(
+            TerminationReason::Blocker {
+                reason: "Missing API key".to_string()
+            }
+            .to_string(),
+            "Unresolvable blocker: Missing API key"
+        );
+
+        assert_eq!(
+            TerminationReason::Error {
+                message: "Docker crashed".to_string()
+            }
+            .to_string(),
+            "Error: Docker crashed"
+        );
+    }
+
+    #[test]
+    fn test_termination_reason_equality() {
+        assert_eq!(TerminationReason::Completed, TerminationReason::Completed);
+        assert_ne!(
+            TerminationReason::Completed,
+            TerminationReason::MaxIterations {
+                reached: 10,
+                limit: 10
+            }
+        );
+        assert_eq!(
+            TerminationReason::MaxIterations {
+                reached: 5,
+                limit: 10
+            },
+            TerminationReason::MaxIterations {
+                reached: 5,
+                limit: 10
+            }
+        );
+        assert_ne!(
+            TerminationReason::MaxIterations {
+                reached: 5,
+                limit: 10
+            },
+            TerminationReason::MaxIterations {
+                reached: 6,
+                limit: 10
+            }
+        );
+    }
+
+    // ------------------------------------------------------------------------
+    // termination_reason() method tests
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_termination_reason_for_non_terminal_state() {
+        let state = LoopState::new();
+        assert!(state.termination_reason(10, 3600).is_none());
+
+        let mut running_state = LoopState::new();
+        running_state.start().unwrap();
+        assert!(running_state.termination_reason(10, 3600).is_none());
+    }
+
+    #[test]
+    fn test_termination_reason_for_completed() {
+        let mut state = LoopState::new();
+        state.status = LoopStatus::Completed;
+
+        let reason = state.termination_reason(10, 3600);
+        assert_eq!(reason, Some(TerminationReason::Completed));
+    }
+
+    #[test]
+    fn test_termination_reason_for_max_iterations() {
+        let mut state = LoopState::new();
+        state.status = LoopStatus::MaxIterations;
+        state.iteration = 10;
+
+        let reason = state.termination_reason(10, 3600);
+        assert_eq!(
+            reason,
+            Some(TerminationReason::MaxIterations {
+                reached: 10,
+                limit: 10
+            })
+        );
+    }
+
+    #[test]
+    fn test_termination_reason_for_timeout() {
+        let mut state = LoopState::new();
+        state.status = LoopStatus::Timeout;
+
+        let reason = state.termination_reason(10, 60);
+        assert!(matches!(
+            reason,
+            Some(TerminationReason::Timeout { limit_secs: 60, .. })
+        ));
+    }
+
+    #[test]
+    fn test_termination_reason_for_blocker_with_reason() {
+        let mut state = LoopState::new();
+        state.start().unwrap();
+        state.start_waiting_for_student().unwrap();
+
+        let output = StudentOutput {
+            status: StudentStatus::CannotComplete,
+            current_step: "Step 3".to_string(),
+            reason: Some("Missing credentials".to_string()),
+            summary: "Cannot proceed".to_string(),
+            ..Default::default()
+        };
+        state.receive_student_result(output, 10).unwrap();
+
+        let reason = state.termination_reason(10, 3600);
+        assert_eq!(
+            reason,
+            Some(TerminationReason::Blocker {
+                reason: "Missing credentials".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn test_termination_reason_for_blocker_without_reason() {
+        let mut state = LoopState::new();
+        state.status = LoopStatus::Blocker;
+        // No history entry, should use default
+
+        let reason = state.termination_reason(10, 3600);
+        assert_eq!(
+            reason,
+            Some(TerminationReason::Blocker {
+                reason: "Unknown blocker".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn test_termination_reason_for_error_with_message() {
+        let mut state = LoopState::new();
+        state.start().unwrap();
+        state.error("Docker container crashed".to_string()).unwrap();
+
+        let reason = state.termination_reason(10, 3600);
+        assert_eq!(
+            reason,
+            Some(TerminationReason::Error {
+                message: "Docker container crashed".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn test_termination_reason_for_error_without_message() {
+        let mut state = LoopState::new();
+        state.status = LoopStatus::Error;
+        // No error_message set, should use default
+
+        let reason = state.termination_reason(10, 3600);
+        assert_eq!(
+            reason,
+            Some(TerminationReason::Error {
+                message: "Unknown error".to_string()
+            })
+        );
+    }
+
+    // ------------------------------------------------------------------------
+    // termination_summary() method tests
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_termination_summary_for_non_terminal_state() {
+        let state = LoopState::new();
+        assert!(state.termination_summary(10, 3600).is_none());
+    }
+
+    #[test]
+    fn test_termination_summary_for_completed() {
+        let mut state = LoopState::new();
+        state.status = LoopStatus::Completed;
+
+        let summary = state.termination_summary(10, 3600);
+        assert!(summary.is_some());
+        assert!(summary.unwrap().contains("completed successfully"));
+    }
+
+    #[test]
+    fn test_termination_summary_for_max_iterations() {
+        let mut state = LoopState::new();
+        state.status = LoopStatus::MaxIterations;
+        state.iteration = 10;
+
+        let summary = state.termination_summary(10, 3600);
+        assert!(summary.is_some());
+        let summary = summary.unwrap();
+        assert!(summary.contains("Maximum iterations"));
+        assert!(summary.contains("10/10"));
+    }
+
+    #[test]
+    fn test_termination_summary_for_timeout() {
+        let mut state = LoopState::new();
+        state.status = LoopStatus::Timeout;
+
+        let summary = state.termination_summary(10, 60);
+        assert!(summary.is_some());
+        let summary = summary.unwrap();
+        assert!(summary.contains("Timeout"));
+        assert!(summary.contains("60s"));
+    }
+
+    #[test]
+    fn test_termination_summary_for_blocker() {
+        let mut state = LoopState::new();
+        state.start().unwrap();
+        state.start_waiting_for_student().unwrap();
+
+        let output = StudentOutput {
+            status: StudentStatus::CannotComplete,
+            current_step: "Step 3".to_string(),
+            reason: Some("API key expired".to_string()),
+            summary: "Cannot proceed".to_string(),
+            ..Default::default()
+        };
+        state.receive_student_result(output, 10).unwrap();
+
+        let summary = state.termination_summary(10, 3600);
+        assert!(summary.is_some());
+        let summary = summary.unwrap();
+        assert!(summary.contains("Unresolvable blocker"));
+        assert!(summary.contains("API key expired"));
+    }
+
+    #[test]
+    fn test_termination_summary_for_error() {
+        let mut state = LoopState::new();
+        state.start().unwrap();
+        state.error("Network failure".to_string()).unwrap();
+
+        let summary = state.termination_summary(10, 3600);
+        assert!(summary.is_some());
+        let summary = summary.unwrap();
+        assert!(summary.contains("Error"));
+        assert!(summary.contains("Network failure"));
+    }
+
+    #[test]
+    fn test_termination_summary_all_terminal_states() {
+        // Verify each terminal state returns a non-empty summary
+        let terminal_states = [
+            LoopStatus::Completed,
+            LoopStatus::MaxIterations,
+            LoopStatus::Blocker,
+            LoopStatus::Timeout,
+            LoopStatus::Error,
+        ];
+
+        for status in terminal_states {
+            let mut state = LoopState::new();
+            state.status = status;
+            state.iteration = 5; // Set iteration for MaxIterations
+
+            let summary = state.termination_summary(10, 3600);
+            assert!(
+                summary.is_some(),
+                "Expected summary for status {status}, got None"
+            );
+            assert!(
+                !summary.as_ref().unwrap().is_empty(),
+                "Expected non-empty summary for status {status}"
+            );
+        }
     }
 }
