@@ -4,6 +4,30 @@
 //!
 //! This crate provides types and utilities for managing Docker containers
 //! used in the SMILE tutorial validation system.
+//!
+//! # Overview
+//!
+//! The main entry point is [`ContainerManager`], which provides methods for:
+//! - Connecting to the Docker daemon
+//! - Health checking the Docker daemon
+//! - (Future) Creating, starting, stopping, and removing containers
+//!
+//! # Example
+//!
+//! ```no_run
+//! use smile_container::ContainerManager;
+//!
+//! # async fn example() -> Result<(), smile_container::ContainerError> {
+//! let manager = ContainerManager::new()?;
+//! manager.health_check().await?;
+//! println!("Docker is ready");
+//! # Ok(())
+//! # }
+//! ```
+
+pub mod manager;
+
+pub use manager::ContainerManager;
 
 use std::path::PathBuf;
 
@@ -201,6 +225,7 @@ impl Container {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
