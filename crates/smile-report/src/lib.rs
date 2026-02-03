@@ -13,10 +13,16 @@
 //! - [`AuditTrail`] - Complete audit trail of commands, files, and LLM calls
 //! - [`Recommendation`] - A prioritized improvement suggestion
 //!
+//! # Generators
+//!
+//! - [`json::JsonGenerator`] - Generate JSON reports with compact or pretty formatting
+//! - [`MarkdownGenerator`] - Generate human-readable Markdown reports
+//!
 //! # Example
 //!
 //! ```rust
 //! use smile_report::{Report, ReportSummary, ReportStatus, Gap, GapSeverity, GapLocation};
+//! use smile_report::json::JsonGenerator;
 //!
 //! let report = Report {
 //!     tutorial_name: "getting-started.md".to_string(),
@@ -41,7 +47,16 @@
 //!     audit_trail: Default::default(),
 //!     recommendations: vec![],
 //! };
+//!
+//! // Generate JSON report
+//! let generator = JsonGenerator::new(&report);
+//! let json = generator.generate_pretty().unwrap();
 //! ```
+
+pub mod json;
+mod markdown;
+
+pub use markdown::MarkdownGenerator;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
